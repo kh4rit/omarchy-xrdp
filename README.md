@@ -12,13 +12,14 @@ xrdp can hand a session to a VNC server over a Unix socket (session `code=1`).
 omarchy-xrdp registers itself as that server:
 
 ```
-RDP client ──► xrdp ──(Unix socket)──► wayvnc ──► Hyprland (user's Omarchy config)
-                │                                     ▲ renders on the GPU into a
-                └─ xrdp-sesman starts, as the user:   │ virtual HEADLESS-RDP output
-                     omarchy-xrdp-session ────────────┘
+RDP client ──► xrdp ──(Unix socket)──► vnc-proxy ──► wayvnc ──► Hyprland (user's Omarchy config)
+                │                                                ▲ renders on the GPU into a
+                └─ xrdp-sesman starts, as the user:              │ virtual HEADLESS-RDP output
+                     omarchy-xrdp-session ───────────────────────┘
                        cage (headless)  gives Hyprland a GPU render node
                        start-hyprland   with ~/.config/hypr + the RDP output
-                       wayvnc           serves that output on xrdp's socket
+                       wayvnc           captures that output, injects input
+                       vnc-proxy        serves xrdp's socket, handles resizing
                        Xwayland :N      the X display sesman/chansrv wait for
                      omarchy-xrdp-wm    sound, and lives as long as the session
 ```
@@ -30,6 +31,13 @@ builds cage with a one-line patch (`cage/xdg-shell-v6.patch`).
 
 Each session runs entirely as the logged-in user. Keyboard and mouse go through
 wayvnc's virtual input devices into that user's Hyprland only.
+
+`omarchy-xrdp-vnc-proxy` exists for resizing. xrdp only resizes a VNC session
+if the server's first update describes the screen layout, which wayvnc doesn't
+do, and wayvnc's own resize path (wlr-output-management) proved unreliable
+with Hyprland. The proxy supplies the initial layout, turns xrdp's resize
+requests into Hyprland monitor rules (`omarchy-xrdp-resize`), and reports the
+result back the way xrdp expects. Everything else passes through unchanged.
 
 ## Install
 
@@ -61,7 +69,9 @@ Users need Omarchy's config in their home (new accounts get it from
 
 Connect to port 3389, pick **Omarchy** (the default) and log in.
 
-- The desktop is sized to the RDP window at login.
+- The desktop follows the RDP window: its size at login, when the window is
+  resized (with the client's dynamic resolution, the default in Windows Remote
+  Desktop), and when reconnecting from a different screen.
 - Omarchy's **Logout** ends the RDP session. Just closing the RDP window leaves
   the session running, and the next login reconnects to it.
 - The Windows key reaches Omarchy when Remote Desktop is full screen (or with
@@ -76,6 +86,9 @@ SCALE=auto          # auto: 1 below 2560 px wide, 1.5 below 3200, else 2
 KEYBOARD=us         # xkb layout (and -variant) for wayvnc's virtual keyboard
 MAX_FPS=60
 RENDER_NODE=/dev/dri/renderD128
+RESIZE=yes          # no: skip the proxy, the desktop keeps its login size
+WAYVNC_LOG=warning  # wayvnc --log-level, e.g. debug
+PROXY_DEBUG=        # 1: log the proxy's resize handling
 ```
 
 Logs: `~/.local/state/omarchy-xrdp/session-<display>.log` for each session,
@@ -84,10 +97,8 @@ and running sessions.
 
 ## Limitations
 
-- **No resizing mid-session.** wayvnc can resize the output, but xrdp only
-  enables resizing if the first VNC update carries the screen layout, and
-  wayvnc sends the cursor first. Reconnecting with a different window size
-  keeps the session's original size.
+- **Single monitor.** The session is one screen; multi-monitor RDP setups
+  are untested.
 - **Clipboard** goes through xrdp's VNC clipboard, which is Latin-1 text only.
 - **Sound** uses pipewire-module-xrdp, which is per user: two simultaneous
   sessions of the same user share (and fight over) one sink.
@@ -114,5 +125,7 @@ sudo pacman -R omarchy-xrdp
   with xdotool and captured with grim, against an unprivileged xrdp instance.
 - `tests/vnc-probe.py` / `tests/vnc-input.py` talk RFB to the session socket
   directly.
+- `tests/resize-scenario.sh` repeatedly connects at a new size and checks the
+  session follows.
 - `tests/ini-roundtrip.sh` checks `setup` and `remove` against copies of the
   installed ini files.

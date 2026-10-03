@@ -43,6 +43,11 @@ case ${1:-} in
     shift
     WAYLAND_DISPLAY=$(<"$dir/wayland") wtype "$@"
     ;;
+  resize)
+    # Resize the client's screen; with /dynamic-resolution FreeRDP follows
+    WAYLAND_DISPLAY=$(<"$dir/wayland") LD_LIBRARY_PATH=$stage/prefix/usr/lib \
+      "$stage/prefix/usr/bin/wlr-randr" --output HEADLESS-1 --custom-mode "$2"
+    ;;
   xtype)
     shift
     DISPLAY=$(<"$dir/x11") LD_LIBRARY_PATH=$stage/prefix/usr/lib "$stage/prefix/usr/bin/xdotool" "$@"

@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Size an Omarchy RDP session's HEADLESS-RDP output.
+#
+#   omarchy-xrdp-resize --rule WIDTH HEIGHT   print the Hyprland monitor rule
+#   omarchy-xrdp-resize WIDTH HEIGHT          apply it to the running session
+#
+# omarchy-xrdp-session uses --rule for the session's generated config, and
+# omarchy-xrdp-vnc-proxy calls the second form when the RDP client changes
+# size. Applying rewrites the rule in the generated config too, so a Hyprland
+# reload keeps the new size.
+
+set -euo pipefail
+
+print_only=0
+if [[ ${1:-} == --rule ]]; then
+  print_only=1
+  shift
+fi
+
+width=${1:-}
+height=${2:-}
+if [[ ! $width =~ ^[0-9]+$ || ! $height =~ ^[0-9]+$ ]]; then
+  echo "Usage: omarchy-xrdp-resize [--rule] WIDTH HEIGHT" >&2
+  exit 1
+fi
+
+SCALE=auto
+config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
+[[ -r $config ]] && source "$config"
+
+scale=$SCALE
+if [[ $scale == auto ]]; then
+  if ((width >= 3200)); then scale=2; elif ((width >= 2560)); then scale=1.5; else scale=1; fi
+fi
+
+rule="hl.monitor({ output = \"HEADLESS-RDP\", mode = \"${width}x${height}@60\", position = \"0x0\", scale = $scale })"
+
+if ((print_only)); then
+  echo "$rule"
+  exit 0
+fi
+
+state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-xrdp/${OMARCHY_XRDP_DISPLAY:?not in an omarchy-xrdp session}"
+sed -i "s|^hl\.monitor({ output = \"HEADLESS-RDP\".*|$rule|" "$state/hyprland.lua"
+hyprctl eval "$rule" >/dev/null

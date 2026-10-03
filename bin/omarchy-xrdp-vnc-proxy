@@ -1,0 +1,474 @@
+#!/usr/bin/env python3
+"""VNC proxy between xrdp and wayvnc that lets xrdp resize the session.
+
+Usage: omarchy-xrdp-vnc-proxy LISTEN_SOCKET WAYVNC_SOCKET [RESIZE_COMMAND]
+
+xrdp resizes VNC sessions with the ExtendedDesktopSize extension, which
+wayvnc (neatvnc) supports, but the two don't fit together as they are:
+
+1. xrdp only enables resizing if the very first FramebufferUpdate carries an
+   ExtendedDesktopSize rect with the initial layout. neatvnc answers that
+   first request with the cursor shape and sends the layout later.
+   -> When the client's SetEncodings asks for ExtendedDesktopSize, send one
+      synthetic update with the current layout before anything from wayvnc.
+
+2. wayvnc resizes through wlr-output-management, which proved unreliable on
+   freshly started sessions, and once it has resized an output Hyprland
+   ignores its own monitor rules for it.
+   -> With RESIZE_COMMAND, SetDesktopSize is not forwarded; the proxy runs
+      `RESIZE_COMMAND WIDTH HEIGHT` (which sets a Hyprland monitor rule)
+      and waits for wayvnc to announce the new framebuffer size.
+
+3. neatvnc announces a finished resize as a server-initiated change (and,
+   without RESIZE_COMMAND, first answers status 4, "request forwarded").
+   xrdp waits for a reply marked as its own and treats non-zero statuses as
+   failure.
+   -> Mark the matching announcement as the reply, hold back "forwarded",
+      confirm requests for the current size right away, retry a resize that
+      doesn't happen within RESIZE_ATTEMPT_TIMEOUT, and after
+      RESIZE_ATTEMPTS answer "prohibited".
+
+To do this the proxy follows the RFB stream in both directions, which works
+because xrdp only enables Raw, CopyRect, Cursor, DesktopSize and
+ExtendedDesktopSize. Anything it can't parse switches that direction to a
+plain relay.
+"""
+import os
+import select
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+
+ENC_RAW = 0
+ENC_COPYRECT = 1
+ENC_CURSOR = -239
+ENC_DESKTOP_SIZE = -223
+ENC_EXTENDED_DESKTOP_SIZE = -308
+
+INITIATOR_SERVER = 0
+INITIATOR_THIS_CLIENT = 1
+STATUS_SUCCESS = 0
+STATUS_PROHIBITED = 1
+STATUS_FORWARDED = 4  # neatvnc extension
+
+RESIZE_ATTEMPT_TIMEOUT = 2.5
+RESIZE_ATTEMPTS = 3
+ENCODINGS_WAIT = 2.0
+CHUNK = 1 << 20
+
+
+DEBUG = bool(os.environ.get("OMARCHY_XRDP_PROXY_DEBUG"))
+
+
+def log(msg):
+    print(f"vnc-proxy: {msg}", file=sys.stderr, flush=True)
+
+
+def debug(msg):
+    if DEBUG:
+        log(f"{time.monotonic():.3f} {msg}")
+
+
+def recv_exact(sock, n):
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise EOFError
+        buf += chunk
+    return bytes(buf)
+
+
+def forward_bytes(src, dst, n, buf):
+    """Copy exactly n bytes from src to dst."""
+    view = memoryview(buf)
+    while n > 0:
+        got = src.recv_into(view[:min(n, len(buf))])
+        if not got:
+            raise EOFError
+        dst.sendall(view[:got])
+        n -= got
+
+
+def relay(src, dst):
+    buf = bytearray(CHUNK)
+    view = memoryview(buf)
+    while True:
+        n = src.recv_into(buf)
+        if not n:
+            raise EOFError
+        dst.sendall(view[:n])
+
+
+def eds_update(width, height, initiator, status, screens):
+    """A FramebufferUpdate holding one ExtendedDesktopSize rect."""
+    head = struct.pack(">BxH", 0, 1)
+    rect = struct.pack(">HHHHi", initiator, status, width, height, ENC_EXTENDED_DESKTOP_SIZE)
+    body = struct.pack(">Bxxx", len(screens)) + b"".join(screens)
+    return head + rect + body
+
+
+def single_screen(width, height):
+    # wayvnc numbers its one output's screen 0
+    return [struct.pack(">IHHHHI", 0, 0, 0, width, height, 0)]
+
+
+class Connection:
+    def __init__(self, client, server, resize_cmd=None):
+        self.client = client
+        self.server = server
+        self.resize_cmd = resize_cmd
+        self.lock = threading.Lock()
+        self.server_lock = threading.Lock()  # both threads write to server
+        self.bytes_per_pixel = 4
+        self.width = 0
+        self.height = 0
+        self.screens = []
+        # The client's resize in progress: size, raw SetDesktopSize message,
+        # attempts so far and when the current attempt times out
+        self.pending = None
+
+    # -- handshake -------------------------------------------------------
+
+    def handshake(self):
+        client, server = self.client, self.server
+        client.sendall(recv_exact(server, 12))  # server version
+        version = recv_exact(client, 12)
+        server.sendall(version)
+
+        if version[:11] == b"RFB 003.003":
+            # 3.3 (what xrdp speaks): the server picks the security type
+            security = recv_exact(server, 4)
+            client.sendall(security)
+            kind = struct.unpack(">I", security)[0]
+            if kind == 0:
+                self.pass_failure_reason()
+                return False
+            if kind != 1:
+                raise ValueError(f"server chose security type {kind}, only None is proxied")
+        elif version[:11] in (b"RFB 003.007", b"RFB 003.008"):
+            ntypes = recv_exact(server, 1)
+            types = recv_exact(server, ntypes[0]) if ntypes[0] else b""
+            client.sendall(ntypes + types)
+            if ntypes[0] == 0:
+                self.pass_failure_reason()
+                return False
+            choice = recv_exact(client, 1)
+            server.sendall(choice)
+            if choice[0] != 1:
+                raise ValueError(f"client chose security type {choice[0]}, only None is proxied")
+            if version[:11] == b"RFB 003.008":
+                result = recv_exact(server, 4)
+                client.sendall(result)
+                if struct.unpack(">I", result)[0] != 0:
+                    return False
+        else:
+            raise ValueError(f"unsupported client version {version!r}")
+
+        server.sendall(recv_exact(client, 1))  # ClientInit
+        init = recv_exact(server, 24)
+        name = recv_exact(server, struct.unpack(">I", init[20:24])[0])
+        client.sendall(init + name)
+        self.width, self.height = struct.unpack(">HH", init[:4])
+        self.bytes_per_pixel = init[4] // 8
+        self.screens = single_screen(self.width, self.height)
+        return True
+
+    def pass_failure_reason(self):
+        length = recv_exact(self.server, 4)
+        self.client.sendall(length + recv_exact(self.server, struct.unpack(">I", length)[0]))
+
+    # -- client -> server ------------------------------------------------
+
+    def read_client_message(self):
+        """Read one client message. Returns (type, bytes), or (type, None)
+        with only the type byte consumed if the message is unknown."""
+        c = self.client
+        kind = recv_exact(c, 1)[0]
+        if kind == 0:  # SetPixelFormat
+            return kind, bytes([kind]) + recv_exact(c, 19)
+        if kind == 2:  # SetEncodings
+            rest = recv_exact(c, 3)
+            count = struct.unpack(">H", rest[1:3])[0]
+            return kind, bytes([kind]) + rest + recv_exact(c, 4 * count)
+        if kind == 3:  # FramebufferUpdateRequest
+            return kind, bytes([kind]) + recv_exact(c, 9)
+        if kind == 4:  # KeyEvent
+            return kind, bytes([kind]) + recv_exact(c, 7)
+        if kind == 5:  # PointerEvent
+            return kind, bytes([kind]) + recv_exact(c, 5)
+        if kind == 6:  # ClientCutText
+            rest = recv_exact(c, 7)
+            length = struct.unpack(">I", rest[3:7])[0]
+            return kind, bytes([kind]) + rest + recv_exact(c, length)
+        if kind == 251:  # SetDesktopSize
+            rest = recv_exact(c, 7)
+            count = rest[5]
+            return kind, bytes([kind]) + rest + recv_exact(c, 16 * count)
+        return kind, None
+
+    def note_client_message(self, kind, raw):
+        if kind == 0:
+            with self.lock:
+                self.bytes_per_pixel = raw[4] // 8
+        elif kind == 251:
+            width, height = struct.unpack(">HH", raw[2:6])
+            debug(f"client SetDesktopSize {width}x{height}")
+            with self.lock:
+                self.pending = {
+                    "size": (width, height),
+                    "raw": raw,
+                    "attempts": 1,
+                    "deadline": time.monotonic() + RESIZE_ATTEMPT_TIMEOUT,
+                }
+
+    def wait_for_encodings(self):
+        """Pass client messages through until SetEncodings. Nothing from the
+        server is forwarded meanwhile, so the synthetic layout update is the
+        first update the client sees."""
+        while True:
+            # A client that never sends SetEncodings would otherwise see
+            # nothing from the server; give up waiting and just relay
+            readable, _, _ = select.select([self.client], [], [], ENCODINGS_WAIT)
+            if not readable:
+                debug("no SetEncodings, relaying unparsed")
+                return False
+            kind, raw = self.read_client_message()
+            if raw is None:
+                self.server.sendall(bytes([kind]))
+                log(f"unknown client message {kind} before SetEncodings")
+                return False
+            self.note_client_message(kind, raw)
+            self.server.sendall(raw)
+            debug(f"client message {kind} (handshake phase)")
+            if kind == 2:
+                count = struct.unpack(">H", raw[2:4])[0]
+                encodings = struct.unpack(f">{count}i", raw[4:4 + 4 * count])
+                if ENC_EXTENDED_DESKTOP_SIZE in encodings:
+                    self.client.sendall(eds_update(self.width, self.height, INITIATOR_SERVER,
+                                                   STATUS_SUCCESS, self.screens))
+                return True
+
+    def client_loop(self):
+        try:
+            while True:
+                kind, raw = self.read_client_message()
+                if raw is None:
+                    log(f"unknown client message {kind}, relaying the rest unparsed")
+                    self.server.sendall(bytes([kind]))
+                    relay(self.client, self.server)
+                self.note_client_message(kind, raw)
+                if kind == 251 and self.resize_cmd:
+                    self.request_resize(raw)
+                    continue
+                with self.server_lock:
+                    self.server.sendall(raw)
+                if kind == 251:
+                    debug("forwarded SetDesktopSize")
+        except (EOFError, OSError):
+            pass
+        finally:
+            self.close()
+
+    # -- server -> client ------------------------------------------------
+
+    def rect_payload_size(self, enc, w, h):
+        bpp = self.bytes_per_pixel
+        if enc == ENC_RAW:
+            return w * h * bpp
+        if enc == ENC_COPYRECT:
+            return 4
+        if enc == ENC_CURSOR:
+            return w * h * bpp + ((w + 7) // 8) * h
+        if enc == ENC_DESKTOP_SIZE:
+            return 0
+        return None
+
+    def request_resize(self, raw):
+        """Resize through the session's own resize command (Hyprland monitor
+        rules) instead of forwarding SetDesktopSize to wayvnc."""
+        width, height = struct.unpack(">HH", raw[2:6])
+        if (width, height) == (self.width, self.height):
+            return  # answer_stale_request confirms it right away
+        debug(f"running {self.resize_cmd} {width} {height}")
+        threading.Thread(target=subprocess.run, args=([self.resize_cmd, str(width), str(height)],),
+                         daemon=True).start()
+
+    def answer_stale_request(self):
+        """Confirm a resize that needs no change, retry one the compositor
+        didn't complete, and finally give up on it."""
+        with self.lock:
+            pending = self.pending
+            if not pending:
+                return
+            already = pending["size"] == (self.width, self.height)
+            if already:
+                self.pending = None
+            elif time.monotonic() < pending["deadline"]:
+                return
+            elif pending["attempts"] < RESIZE_ATTEMPTS:
+                pending["attempts"] += 1
+                pending["deadline"] = time.monotonic() + RESIZE_ATTEMPT_TIMEOUT
+            else:
+                self.pending = None
+        width, height = pending["size"]
+        if already:
+            debug(f"already {width}x{height}, confirming")
+            self.client.sendall(eds_update(width, height, INITIATOR_THIS_CLIENT,
+                                           STATUS_SUCCESS, self.screens))
+            return
+        if self.pending is pending:
+            debug(f"resize to {width}x{height} not done yet, trying again")
+            if self.resize_cmd:
+                self.request_resize(pending["raw"])
+            else:
+                with self.server_lock:
+                    self.server.sendall(pending["raw"])
+            return
+        log(f"resize to {width}x{height} did not complete, refusing it")
+        self.client.sendall(eds_update(self.width, self.height, INITIATOR_THIS_CLIENT,
+                                       STATUS_PROHIBITED, self.screens))
+
+    def read_eds_body(self):
+        head = recv_exact(self.server, 4)
+        screens = [recv_exact(self.server, 16) for _ in range(head[0])]
+        return head, screens
+
+    def server_update(self, buf):
+        server, client = self.server, self.client
+        nrects = struct.unpack(">H", recv_exact(server, 3)[1:3])[0]
+        if nrects == 0:
+            client.sendall(struct.pack(">BxH", 0, 0))
+            return
+
+        rect = recv_exact(server, 12)
+        x, y, w, h, enc = struct.unpack(">HHHHi", rect)
+        if enc == ENC_EXTENDED_DESKTOP_SIZE:
+            debug(f"server EDS initiator {x} status {y} {w}x{h} (update of {nrects})")
+
+        # neatvnc's reply to SetDesktopSize is an update of its own
+        if nrects == 1 and enc == ENC_EXTENDED_DESKTOP_SIZE and x == INITIATOR_THIS_CLIENT:
+            head, screens = self.read_eds_body()
+            with self.lock:
+                pending = self.pending
+                if y == STATUS_FORWARDED and pending and pending["size"] != (self.width, self.height):
+                    return  # wait for the completion instead
+                self.pending = None
+            if y == STATUS_FORWARDED:  # already that size: nothing will follow
+                rect = struct.pack(">HHHHi", x, STATUS_SUCCESS, w, h, enc)
+            client.sendall(struct.pack(">BxH", 0, 1) + rect + head + b"".join(screens))
+            return
+
+        client.sendall(struct.pack(">BxH", 0, nrects))
+        for i in range(nrects):
+            if i:
+                rect = recv_exact(server, 12)
+                x, y, w, h, enc = struct.unpack(">HHHHi", rect)
+                if enc == ENC_EXTENDED_DESKTOP_SIZE:
+                    debug(f"server EDS initiator {x} status {y} {w}x{h} (rect {i} of {nrects})")
+            if enc == ENC_EXTENDED_DESKTOP_SIZE:
+                head, screens = self.read_eds_body()
+                with self.lock:
+                    pending = self.pending
+                    if x == INITIATOR_SERVER and y == STATUS_SUCCESS and pending \
+                            and pending["size"] == (w, h):
+                        # The finished resize the client asked for
+                        rect = struct.pack(">HHHHi", INITIATOR_THIS_CLIENT, STATUS_SUCCESS, w, h, enc)
+                        self.pending = None
+                    if y == STATUS_SUCCESS:
+                        self.width, self.height, self.screens = w, h, screens
+                client.sendall(rect + head + b"".join(screens))
+                continue
+            size = self.rect_payload_size(enc, w, h)
+            if size is None:
+                client.sendall(rect)  # the relay carries on from its payload
+                raise NotImplementedError(f"encoding {enc}")
+            if enc == ENC_DESKTOP_SIZE:
+                with self.lock:
+                    self.width, self.height = w, h
+                    self.screens = single_screen(w, h)
+            client.sendall(rect)
+            forward_bytes(server, client, size, buf)
+
+    def server_loop(self):
+        server, client = self.server, self.client
+        buf = bytearray(CHUNK)
+        try:
+            while True:
+                self.answer_stale_request()
+                kind = recv_exact(server, 1)[0]
+                if kind == 0:
+                    self.server_update(buf)
+                elif kind == 2:  # Bell
+                    client.sendall(b"\x02")
+                elif kind == 3:  # ServerCutText
+                    rest = recv_exact(server, 7)
+                    client.sendall(b"\x03" + rest)
+                    forward_bytes(server, client, struct.unpack(">I", rest[3:7])[0], buf)
+                else:
+                    client.sendall(bytes([kind]))  # the relay carries on from here
+                    raise NotImplementedError(f"server message {kind}")
+        except NotImplementedError as e:
+            # Everything read so far has been forwarded; stop parsing
+            log(f"cannot parse {e}, relaying the rest unparsed")
+            try:
+                relay(server, client)
+            except (EOFError, OSError):
+                pass
+        except (EOFError, OSError):
+            pass
+        finally:
+            self.close()
+
+    def close(self):
+        for s in (self.client, self.server):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
+def handle(client, upstream_path, resize_cmd):
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.connect(upstream_path)
+        conn = Connection(client, server, resize_cmd)
+        if not conn.handshake():
+            return
+        if conn.wait_for_encodings():
+            threading.Thread(target=conn.client_loop, daemon=True).start()
+            conn.server_loop()
+        else:
+            upstream = threading.Thread(target=relay, args=(client, server), daemon=True)
+            upstream.start()
+            relay(server, client)
+    except (EOFError, OSError, ValueError) as e:
+        if not isinstance(e, EOFError):
+            log(f"connection ended: {e}")
+    finally:
+        client.close()
+        server.close()
+
+
+def main():
+    listen_path, upstream_path = sys.argv[1], sys.argv[2]
+    resize_cmd = sys.argv[3] if len(sys.argv) > 3 else None
+    try:
+        os.unlink(listen_path)
+    except FileNotFoundError:
+        pass
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(listen_path)
+    os.chmod(listen_path, 0o660)
+    listener.listen(4)
+    log(f"listening on {listen_path}, forwarding to {upstream_path}")
+    while True:
+        client, _ = listener.accept()
+        threading.Thread(target=handle, args=(client, upstream_path, resize_cmd), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

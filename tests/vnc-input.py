@@ -7,6 +7,7 @@ Usage: vnc-input.py SOCKET ACTION...
   text:STRING     type ASCII text
   move:X,Y        move the pointer
   click:X,Y       left-click at X,Y
+  encodings:A,B   send SetEncodings (e.g. encodings:0)
   clip:TEXT       set the server clipboard (ClientCutText, Latin-1)
   waitclip:SECS   wait for the server clipboard (ServerCutText) and print it
   sleep:SECONDS
@@ -95,6 +96,9 @@ def main():
             pointer(s, x, y)
             pointer(s, x, y, 1)
             pointer(s, x, y, 0)
+        elif kind == "encodings":
+            encs = [int(e) for e in arg.split(",")]
+            s.sendall(struct.pack(">BxH", 2, len(encs)) + b"".join(struct.pack(">i", e) for e in encs))
         elif kind == "clip":
             data = arg.encode("latin-1")
             s.sendall(struct.pack(">BxxxI", 6, len(data)) + data)
