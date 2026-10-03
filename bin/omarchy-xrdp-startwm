@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# xrdp-sesman's window manager step (sesman.ini DefaultWindowManager).
+# Omarchy sessions already have Hyprland running, so hand over to the session
+# helper. Every other session type (e.g. Xorg) gets xrdp's stock startwm.sh,
+# which runs ~/.xinitrc.
+
+display=${DISPLAY#:}
+display=${display%%.*}
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+
+if [ -f "$runtime/omarchy-xrdp/$display/pid" ]; then
+  exec "$(dirname "$0")/omarchy-xrdp-wm" "$display"
+fi
+
+exec /etc/xrdp/startwm.sh

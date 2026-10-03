@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Window manager step for an Omarchy RDP session. Hyprland was already started
+# by omarchy-xrdp-session; this runs with the full login environment (sesman
+# sets XRDP_* and PAM's variables here, not for the X server), so it does the
+# per-session setup that needs it, then stays alive as long as the session:
+# sesman ends the session when this exits.
+
+display=$1
+runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+state="$runtime/omarchy-xrdp/$display"
+session_pid=$(<"$state/pid")
+
+# Play the session's sound on the RDP client
+pw_loader=/usr/lib/pipewire-module-xrdp/load_pw_modules.sh
+if [[ -x $pw_loader ]]; then
+  "$pw_loader" >/dev/null 2>&1 &
+fi
+
+while kill -0 "$session_pid" 2>/dev/null; do
+  sleep 2
+done
