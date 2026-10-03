@@ -7,6 +7,8 @@ root=$(dirname "$(readlink -f "$0")")/..
 stage=${STAGE:-/tmp/omxrdp-test}
 mkdir -p "$stage/lib" "$stage/tests"
 cp "$root"/bin/* "$stage/lib/"
+mkdir -p "$stage/lib/shims"
+cp "$root"/shims/* "$stage/lib/shims/"
 cp "$root"/tests/*.sh "$stage/tests/"
 [[ -n ${1:-} ]] && cp "$1" "$stage/lib/cage"
 cat >"$stage/start" <<EOS

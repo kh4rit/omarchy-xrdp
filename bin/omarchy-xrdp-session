@@ -74,7 +74,7 @@ export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=Hyprland
 export XDG_SESSION_DESKTOP=Hyprland
 export OMARCHY_XRDP_DISPLAY=$display
-export PATH="$LIBDIR:$PATH:/usr/local/bin"
+export PATH="$LIBDIR/shims:$PATH:/usr/local/bin"
 if [[ -r /etc/locale.conf ]]; then
   set -a
   source /etc/locale.conf
@@ -86,7 +86,12 @@ state="$XDG_RUNTIME_DIR/omarchy-xrdp/$display"
 logdir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-xrdp"
 rm -rf "$state"
 mkdir -p "$state" "$logdir"
-exec >"$logdir/session-$display.log" 2>&1
+logfile="$logdir/session-$display.log"
+if [[ -f $logfile ]] && (($(stat -c %s "$logfile") > 1048576)); then
+  mv "$logfile" "$logfile.old"
+fi
+exec >>"$logfile" 2>&1
+echo "----"
 
 log() { echo "$(date '+%H:%M:%S') $*"; }
 
@@ -112,7 +117,7 @@ other_omarchy_sessions() {
 cleanup() {
   trap - EXIT TERM INT HUP
   log "Stopping session"
-  [[ -n $hypr_sig ]] && HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl dispatch exit >/dev/null 2>&1
+  [[ -n $hypr_sig ]] && HYPRLAND_INSTANCE_SIGNATURE=$hypr_sig hyprctl dispatch 'hl.dsp.exit()' >/dev/null 2>&1
 
   # Hyprland survives cage going away, so stop it (and start-hyprland) directly
   local stop=("${pids[@]}")
@@ -164,16 +169,19 @@ fi
 host_wayland=$(<"$state/host-wayland")
 start_pid=$(<"$state/start-pid")
 
-# The Hyprland instance is the one whose parent is our start-hyprland
+# The Hyprland instance is the one whose parent is our start-hyprland. Read
+# the instance lock files (pid, then Wayland socket) rather than
+# `hyprctl instances`, which chokes on stale instance directories.
 hypr_instance() {
-  local pid sig sock
-  while read -r pid sig sock; do
-    if [[ $(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') == "$start_pid" ]]; then
-      hypr_sig=$sig
+  local lock pid sock
+  for lock in "$XDG_RUNTIME_DIR"/hypr/*/hyprland.lock; do
+    { read -r pid && read -r sock; } <"$lock" 2>/dev/null || continue
+    if [[ -n $sock && $(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ') == "$start_pid" ]]; then
+      hypr_sig=$(basename "$(dirname "$lock")")
       hypr_wayland=$sock
       return 0
     fi
-  done < <(hyprctl -j instances 2>/dev/null | jq -r '.[] | "\(.pid) \(.instance) \(.wl_socket)"')
+  done
   return 1
 }
 if ! wait_for 200 hypr_instance; then
@@ -196,13 +204,18 @@ fi
 
 wayvnc_args=(--unix-socket --output=RDP-1 --max-fps="$MAX_FPS" --socket="$state/wayvnc-control.sock")
 [[ -n $KEYBOARD ]] && wayvnc_args+=(--keyboard="$KEYBOARD")
-WAYLAND_DISPLAY=$hypr_wayland wayvnc "${wayvnc_args[@]}" "$socket" &
-pids+=($!)
-if ! wait_for 50 test -S "$socket"; then
+
+start_wayvnc() {
+  rm -f "$socket" "$state/wayvnc-control.sock"
+  WAYLAND_DISPLAY=$hypr_wayland wayvnc "${wayvnc_args[@]}" "$socket" &
+  wayvnc_pid=$!
+  pids+=("$wayvnc_pid")
+  wait_for 50 test -S "$socket" && chmod 660 "$socket"
+}
+if ! start_wayvnc; then
   log "wayvnc did not start"
   exit 1
 fi
-chmod 660 "$socket"
 
 # The X display xrdp waits for. Started last, so the session only reports
 # ready once the VNC socket is listening.
@@ -216,6 +229,26 @@ fi
 echo $$ >"$state/pid"
 log "Session ready"
 
-# Hyprland exiting (Omarchy logout) closes cage, which ends the session
-wait "$cage_pid"
+# Running and not a zombie (cage doesn't reap start-hyprland when it exits)
+alive() {
+  local stat
+  stat=$(<"/proc/$1/stat") 2>/dev/null || return 1
+  stat=${stat##*) }
+  [[ ${stat%% *} != Z ]]
+}
+
+# The session lasts as long as Hyprland: Omarchy logout ends it. Keep wayvnc
+# up meanwhile, since xrdp reconnects to the same socket.
+restarts=0
+while alive "$cage_pid" && alive "$start_pid"; do
+  if ! alive "$wayvnc_pid"; then
+    if ((++restarts > 5)); then
+      log "wayvnc keeps exiting, ending session"
+      exit 1
+    fi
+    log "wayvnc exited, restarting ($restarts)"
+    start_wayvnc
+  fi
+  sleep 1
+done
 log "Hyprland exited"

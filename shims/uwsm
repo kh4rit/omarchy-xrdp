@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# In an omarchy-xrdp session Hyprland is started by omarchy-xrdp-session, not
+# uwsm, so Omarchy's logout (`uwsm stop`) would leave it running. Turn that
+# into exiting this session's Hyprland, which ends the RDP session. Anything
+# else, or any call from outside an omarchy-xrdp Hyprland, goes to real uwsm.
+
+state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-xrdp/${OMARCHY_XRDP_DISPLAY:-none}"
+
+if [[ ${1:-} == stop && -n ${HYPRLAND_INSTANCE_SIGNATURE:-} && -r $state/hyprland-instance &&
+  $(<"$state/hyprland-instance") == "$HYPRLAND_INSTANCE_SIGNATURE" ]]; then
+  exec hyprctl dispatch 'hl.dsp.exit()'
+fi
+
+exec /usr/bin/uwsm "$@"
