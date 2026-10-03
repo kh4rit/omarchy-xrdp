@@ -104,6 +104,10 @@ start_pid=""
 # Apps Omarchy launches with uwsm-app live in these systemd --user slices
 # rather than under Hyprland, so they outlive it unless stopped.
 graphical_slices=(app-graphical.slice background-graphical.slice session-graphical.slice)
+session_env=(WAYLAND_DISPLAY DISPLAY HYPRLAND_INSTANCE_SIGNATURE HYPRLAND_CMD
+  XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE
+  OMARCHY_XRDP_DISPLAY OMARCHY_XRDP_LIBDIR
+  XRDP_SESSION XRDP_SOCKET_PATH XRDP_PULSE_SINK_SOCKET XRDP_PULSE_SOURCE_SOCKET)
 
 other_omarchy_sessions() {
   local dir
@@ -129,7 +133,12 @@ cleanup() {
   sleep 1
   kill -9 "${stop[@]}" 2>/dev/null
 
-  other_omarchy_sessions || systemctl --user stop "${graphical_slices[@]}" 2>/dev/null
+  # Omarchy's autostart imports the session's environment into systemd
+  # --user; as uwsm does for local sessions, take it back out at logout
+  if ! other_omarchy_sessions; then
+    systemctl --user stop "${graphical_slices[@]}" 2>/dev/null
+    systemctl --user unset-environment "${session_env[@]}" 2>/dev/null
+  fi
   rm -rf "$state"
   rm -f "$socket"
 }
