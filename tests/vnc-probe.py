@@ -4,6 +4,7 @@ request one full framebuffer update in Raw encoding and save it as a PPM.
 
 Usage: vnc-probe.py SOCKET OUT.ppm [timeout-seconds]
 """
+import os
 import socket
 import struct
 import sys
@@ -53,7 +54,10 @@ def main():
 
     # Ask for 32bpp little-endian true colour so decoding is predictable
     s.sendall(struct.pack(">BxxxBBBBHHHBBBxxx", 0, 32, 24, 0, 1, 255, 255, 255, 16, 8, 0))
-    s.sendall(struct.pack(">BxHi", 2, 1, 0))  # SetEncodings: Raw
+    # SetEncodings: Raw, plus ExtendedDesktopSize (-308) and DesktopSize
+    # (-223) the way xrdp asks for them
+    encodings = [int(e) for e in os.environ.get("PROBE_ENCODINGS", "0,-308,-223").split(",")]
+    s.sendall(struct.pack(">BxH", 2, len(encodings)) + b"".join(struct.pack(">i", e) for e in encodings))
     s.sendall(struct.pack(">BBHHHH", 3, 0, 0, 0, width, height))  # full update
 
     pixels = bytearray(width * height * 3)
@@ -72,6 +76,7 @@ def main():
             sys.exit(f"unexpected server message {msg_type}")
         recv_exact(s, 1)
         nrects = struct.unpack(">H", recv_exact(s, 2))[0]
+        print(f"FramebufferUpdate with {nrects} rects")
         for _ in range(nrects):
             x, y, w, h, enc = struct.unpack(">HHHHi", recv_exact(s, 12))
             if enc != 0:
@@ -80,6 +85,12 @@ def main():
                     recv_exact(s, w * h * 4 + ((w + 7) // 8) * h)
                 elif enc in (-223,):  # DesktopSize
                     pass
+                elif enc == -308:  # ExtendedDesktopSize
+                    nscreens = recv_exact(s, 4)[0]
+                    for _ in range(nscreens):
+                        sid, sx, sy, sw, sh, flags = struct.unpack(">IHHHHI", recv_exact(s, 16))
+                        print(f"  screen id {sid} {sw}x{sh}+{sx}+{sy} flags {flags}")
+                    print(f"  ExtendedDesktopSize rect reason x={x} status y={y}")
                 else:
                     sys.exit(f"cannot skip encoding {enc}")
                 continue
