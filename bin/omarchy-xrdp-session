@@ -8,8 +8,9 @@
 #
 #   cage (headless, gives Hyprland the GPU render node)
 #    └─ start-hyprland → Hyprland, rendering to a virtual HEADLESS-RDP output
-#       (wayvnc only lets clients resize outputs named HEADLESS-*)
-#         └─ wayvnc on HEADLESS-RDP, listening on the Unix socket xrdp connects to
+#         └─ wayvnc capturing HEADLESS-RDP and injecting input
+#   omarchy-xrdp-vnc-proxy on the Unix socket xrdp connects to, relaying to
+#   wayvnc and turning xrdp's resize requests into monitor rules
 #   Xwayland :N on cage, so sesman's waitforx and xrdp-chansrv have the
 #   X display they expect
 #
@@ -234,13 +235,18 @@ if ! start_wayvnc; then
   exit 1
 fi
 
-if [[ $RESIZE == yes ]]; then
-  OMARCHY_XRDP_PROXY_DEBUG=$PROXY_DEBUG "$LIBDIR/omarchy-xrdp-vnc-proxy" "$socket" "$vnc_socket" "$LIBDIR/omarchy-xrdp-resize" &
-  pids+=($!)
-  if ! wait_for 50 test -S "$socket"; then
-    log "VNC proxy did not start"
-    exit 1
-  fi
+proxy_pid=""
+start_proxy() {
+  rm -f "$socket"
+  OMARCHY_XRDP_PROXY_DEBUG=$PROXY_DEBUG "$LIBDIR/omarchy-xrdp-vnc-proxy" \
+    "$socket" "$vnc_socket" "$LIBDIR/omarchy-xrdp-resize" &
+  proxy_pid=$!
+  pids+=("$proxy_pid")
+  wait_for 50 test -S "$socket"
+}
+if [[ $RESIZE == yes ]] && ! start_proxy; then
+  log "VNC proxy did not start"
+  exit 1
 fi
 
 # The X display xrdp waits for. Started last, so the session only reports
@@ -264,17 +270,19 @@ alive() {
 }
 
 # The session lasts as long as Hyprland: Omarchy logout ends it. Keep wayvnc
-# up meanwhile, since xrdp reconnects to the same socket.
+# and the proxy up meanwhile, since xrdp reconnects to the same socket.
 restarts=0
 while alive "$cage_pid" && alive "$start_pid"; do
-  if ! alive "$wayvnc_pid"; then
+  for piece in wayvnc proxy; do
+    pid_var=${piece}_pid
+    [[ -n ${!pid_var} ]] && ! alive "${!pid_var}" || continue
     if ((++restarts > 5)); then
-      log "wayvnc keeps exiting, ending session"
+      log "$piece keeps exiting, ending session"
       exit 1
     fi
-    log "wayvnc exited, restarting ($restarts)"
-    start_wayvnc
-  fi
+    log "$piece exited, restarting ($restarts)"
+    start_$piece
+  done
   sleep 1
 done
 log "Hyprland exited"
