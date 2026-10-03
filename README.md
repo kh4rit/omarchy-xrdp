@@ -123,6 +123,9 @@ sudo pacman -R omarchy-xrdp
   (`sesman-emulate.sh`) as a transient `systemd --user` unit of the test user.
 - `tests/rdp-client.sh` runs FreeRDP inside a private headless cage, driven
   with xdotool and captured with grim, against an unprivileged xrdp instance.
+  Use `RDP_CLIENT=xfreerdp3` (the SDL client draws nothing in a headless
+  cage). The first input event after connecting only gives the X11 client
+  focus, so click or send a throwaway key before typing.
 - `tests/vnc-probe.py` / `tests/vnc-input.py` talk RFB to the session socket
   directly.
 - `tests/resize-scenario.sh` repeatedly connects at a new size and checks the

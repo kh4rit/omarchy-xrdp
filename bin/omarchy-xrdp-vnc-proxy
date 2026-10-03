@@ -211,6 +211,9 @@ class Connection:
         return kind, None
 
     def note_client_message(self, kind, raw):
+        if kind == 4 and DEBUG:
+            down, keysym = struct.unpack(">BxxI", raw[1:8])
+            debug(f"key {'down' if down else 'up'} keysym {keysym:#x}")
         if kind == 0:
             with self.lock:
                 self.bytes_per_pixel = raw[4] // 8
