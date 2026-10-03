@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Runs inside the headless cage: records cage's Wayland socket and the
+# start-hyprland PID for omarchy-xrdp-session, then becomes start-hyprland.
+
+state=$1
+
+echo "$WAYLAND_DISPLAY" >"$state/host-wayland"
+echo $$ >"$state/start-pid.tmp"
+mv "$state/start-pid.tmp" "$state/start-pid"
+
+exec start-hyprland -- --config "$state/hyprland.lua"
