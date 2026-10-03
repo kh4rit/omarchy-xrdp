@@ -10,6 +10,8 @@ cp "$root"/bin/* "$stage/lib/"
 mkdir -p "$stage/lib/shims"
 cp "$root"/shims/* "$stage/lib/shims/"
 cp "$root"/tests/*.sh "$stage/tests/"
+mkdir -p "$stage/systemd"
+cp "$root"/systemd/* "$stage/systemd/"
 [[ -n ${1:-} ]] && cp "$1" "$stage/lib/cage"
 cat >"$stage/start" <<EOS
 #!/bin/bash
@@ -22,5 +24,5 @@ cat >"$stage/stop" <<EOS
 exec $stage/tests/stop-test-session.sh "\$@"
 EOS
 chmod 755 "$stage/start" "$stage/stop"
-chmod -R a+rX "$stage/lib" "$stage/tests" "$stage/start" "$stage/stop"
+chmod -R a+rX "$stage/lib" "$stage/tests" "$stage/systemd" "$stage/start" "$stage/stop"
 echo "staged into $stage"

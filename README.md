@@ -32,6 +32,12 @@ builds cage with a one-line patch (`cage/xdg-shell-v6.patch`).
 Each session runs entirely as the logged-in user. Keyboard and mouse go through
 wayvnc's virtual input devices into that user's Hyprland only.
 
+A local Omarchy login is run by uwsm, which brings up `graphical-session.target`
+(and with it Omarchy's session services: input method, crash watch, ...) and
+clears the session out of `systemd --user` at logout. In an RDP session
+`omarchy-xrdp-session.target` does that job, and a small `uwsm` shim turns
+Omarchy's logout (`uwsm stop`) into ending the RDP session.
+
 `omarchy-xrdp-vnc-proxy` exists for resizing. xrdp only resizes a VNC session
 if the server's first update describes the screen layout, which wayvnc doesn't
 do, and wayvnc's own resize path (wlr-output-management) proved unreliable
@@ -106,6 +112,8 @@ and running sessions.
   `--user` environment is shared between a user's sessions.
 - Takes over sesman's `[Xvnc]` session type, so TigerVNC-backed Xvnc sessions
   are no longer available.
+- XDG autostart entries (`~/.config/autostart`, `/etc/xdg/autostart`) don't
+  run; Omarchy's own autostart (in the Hyprland config) does.
 
 ## Uninstall
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Omarchy RDP session
+Documentation=file:///usr/share/doc/omarchy-xrdp/README.md
+# Plays the part uwsm's wayland-session@.target does for a local Omarchy
+# login: brings up graphical-session.target, so Omarchy's session services
+# (input method, crash watch, ...) run, and takes it down at logout.
+Wants=graphical-session-pre.target
+After=graphical-session-pre.target
+BindsTo=graphical-session.target
+Before=graphical-session.target
+PropagatesStopTo=graphical-session.target graphical-session-pre.target

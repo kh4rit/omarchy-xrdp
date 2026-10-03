@@ -134,10 +134,10 @@ cleanup() {
   sleep 1
   kill -9 "${stop[@]}" 2>/dev/null
 
-  # Omarchy's autostart imports the session's environment into systemd
-  # --user; as uwsm does for local sessions, take it back out at logout
+  # Undo what the session put into systemd --user, as uwsm does for local
+  # sessions: its services, apps and environment
   if ! other_omarchy_sessions; then
-    systemctl --user stop "${graphical_slices[@]}" 2>/dev/null
+    systemctl --user stop omarchy-xrdp-session.target "${graphical_slices[@]}" 2>/dev/null
     systemctl --user unset-environment "${session_env[@]}" 2>/dev/null
   fi
   rm -rf "$state"
@@ -211,6 +211,13 @@ if ! wait_for 50 rdp_output_ready; then
   log "Could not create the HEADLESS-RDP output"
   exit 1
 fi
+
+# Start Omarchy's session services (graphical-session.target) with this
+# session's Wayland environment; Omarchy's autostart imports the rest
+WAYLAND_DISPLAY=$hypr_wayland systemctl --user import-environment \
+  WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP \
+  XDG_SESSION_TYPE OMARCHY_XRDP_DISPLAY
+systemctl --user start --no-block omarchy-xrdp-session.target
 
 # With RESIZE, wayvnc listens privately and omarchy-xrdp-vnc-proxy serves
 # xrdp's socket, so xrdp can resize the session to the client window

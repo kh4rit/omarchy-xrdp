@@ -27,6 +27,9 @@ check() {
 as_user "$stage/stop" 20 2>/dev/null
 as_user "$start" 20 1600x900 >/dev/null
 check "session starts" "1600x900" "$(size)"
+sleep 3
+check "Omarchy session services start" "== graphical-session.target: active" \
+  "$(as_user "$stage/tests/user-units.sh" | tail -1)"
 as_user chmod 666 "$stage/vnc-20.sock"
 
 RDP_CLIENT=xfreerdp3 "$client" start 127.0.0.1:13389 1280x720 /dynamic-resolution >/dev/null
@@ -61,6 +64,8 @@ status=$(as_user "$stage/tests/status.sh" 20)
 check "Omarchy logout ends the session" "unit omxrdp-test-20: inactive" "$(head -1 <<<"$status")"
 check "logout cleans up state" "state dir: gone" "$(sed -n 2p <<<"$status")"
 check "logout leaves no processes" "processes: 0" "$(sed -n 3p <<<"$status")"
+check "logout stops Omarchy session services" "== graphical-session.target: inactive" \
+  "$(as_user "$stage/tests/user-units.sh" | tail -1)"
 
 "$client" stop
 echo "$failures failure(s)"

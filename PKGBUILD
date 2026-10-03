@@ -35,6 +35,8 @@ package() {
     install -Dm755 "$startdir/bin/$script" "$lib/$script"
   done
   install -Dm755 "$startdir/shims/uwsm" "$lib/shims/uwsm"
+  install -Dm644 "$startdir/systemd/omarchy-xrdp-session.target" \
+    "$pkgdir/usr/lib/systemd/user/omarchy-xrdp-session.target"
   install -Dm755 "$startdir/bin/omarchy-xrdp" "$pkgdir/usr/bin/omarchy-xrdp"
   install -Dm644 "$startdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
 }
