@@ -1,0 +1,17 @@
+Advertise xdg_wm_base version 6.
+
+Hyprland's nested (Wayland) backend binds xdg_wm_base version 6 and refuses
+to start against cage 0.3.1, which offers 5. wlroots 0.20 supports up to 7;
+version 6 only adds the optional "suspended" toplevel state.
+
+--- a/cage.c
++++ b/cage.c
+@@ -432,7 +432,7 @@
+ 	wl_signal_add(&server.idle_inhibit_v1->events.new_inhibitor, &server.new_idle_inhibitor_v1);
+ 	wl_list_init(&server.inhibitors);
+
+-	struct wlr_xdg_shell *xdg_shell = wlr_xdg_shell_create(server.wl_display, 5);
++	struct wlr_xdg_shell *xdg_shell = wlr_xdg_shell_create(server.wl_display, 6);
+ 	if (!xdg_shell) {
+ 		wlr_log(WLR_ERROR, "Unable to create the XDG shell interface");
+ 		ret = 1;

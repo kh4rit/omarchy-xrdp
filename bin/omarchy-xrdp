@@ -1,0 +1,168 @@
+#!/bin/bash
+
+# Configure xrdp to offer Omarchy (Hyprland) desktops.
+#
+#   omarchy-xrdp setup    Add the "Omarchy" session to xrdp (needs root)
+#   omarchy-xrdp remove   Undo setup (needs root)
+#   omarchy-xrdp status   Show configuration and running Omarchy RDP sessions
+#
+# setup adds an [Omarchy] section to xrdp.ini (a VNC-over-Unix-socket
+# session, code=1), points sesman's Xvnc server at omarchy-xrdp-session and
+# its default window manager at omarchy-xrdp-startwm. Every change is
+# recorded with an "omarchy-xrdp" marker so remove can put things back.
+
+set -euo pipefail
+
+LIBDIR=${OMARCHY_XRDP_LIBDIR:-/usr/lib/omarchy-xrdp}
+XRDP_INI=${XRDP_INI:-/etc/xrdp/xrdp.ini}
+SESMAN_INI=${SESMAN_INI:-/etc/xrdp/sesman.ini}
+MARK="; omarchy-xrdp"
+
+need_root() {
+  # OMARCHY_XRDP_NO_ROOT=1 lets tests run against copies of the ini files
+  if ((EUID != 0)) && [[ -z ${OMARCHY_XRDP_NO_ROOT:-} ]]; then
+    echo "omarchy-xrdp $1 needs root: sudo omarchy-xrdp $1" >&2
+    exit 1
+  fi
+}
+
+# Replace a file with the output of a filter, keeping ownership and mode
+rewrite() {
+  local file=$1 tmp
+  shift
+  tmp=$(mktemp "$file.XXXXXX")
+  "$@" <"$file" >"$tmp"
+  chmod --reference="$file" "$tmp"
+  chown --reference="$file" "$tmp"
+  mv "$tmp" "$file"
+}
+
+xrdp_ini_add() {
+  # Insert the Omarchy session before the first session section so it is
+  # the login screen's default
+  awk -v mark="$MARK" '
+    function block() {
+      print mark " begin"
+      print "[Omarchy]"
+      print "name=Omarchy"
+      print "lib=libvnc.so"
+      print "username=ask"
+      print "password=ask"
+      print "port=-1"
+      print "code=1"
+      print mark " end"
+      print ""
+      done = 1
+    }
+    !done && /^\[/ && !/^\[(Globals|Logging|LoggingPerLogger|Channels)\]/ { block() }
+    { print }
+    END { if (!done) { print ""; block() } }
+  '
+}
+
+xrdp_ini_remove() {
+  awk -v mark="$MARK" '
+    $0 == mark " begin" { skip = 1; next }
+    skip && $0 == mark " end" { skip = 0; dropblank = 1; next }
+    skip { next }
+    dropblank && /^$/ { dropblank = 0; next }
+    { dropblank = 0; print }
+  '
+}
+
+# In section [$section], replace the first line starting with "$key=" by
+# "$key=$value", recording the original in a marker comment above it
+sesman_set() {
+  local section=$1 key=$2 value=$3
+  awk -v mark="$MARK" -v section="[$section]" -v key="$key" -v value="$value" '
+    /^\[/ { in_section = ($0 == section) }
+    in_section && !done && index($0, key "=") == 1 {
+      print mark " was: " $0
+      print key "=" value
+      done = 1
+      next
+    }
+    { print }
+  '
+}
+
+sesman_restore() {
+  awk -v mark="$MARK" '
+    index($0, mark " was: ") == 1 { print substr($0, length(mark " was: ") + 1); skip_next = 1; next }
+    skip_next { skip_next = 0; next }
+    { print }
+  '
+}
+
+is_set_up() {
+  grep -qxF "$MARK begin" "$XRDP_INI" && grep -q "^$MARK was: " "$SESMAN_INI"
+}
+
+reload_sesman() {
+  # sesman re-reads sesman.ini on SIGHUP; xrdp reads xrdp.ini per connection
+  if [[ -z ${OMARCHY_XRDP_NO_ROOT:-} ]] && systemctl is-active --quiet xrdp-sesman.service; then
+    systemctl reload xrdp-sesman.service
+  fi
+}
+
+setup() {
+  need_root setup
+  for file in "$XRDP_INI" "$SESMAN_INI"; do
+    [[ -f $file ]] || { echo "Missing $file: is xrdp installed?" >&2; exit 1; }
+  done
+  if is_set_up; then
+    echo "xrdp already offers the Omarchy session"
+    return
+  fi
+
+  cp -a "$XRDP_INI" "$XRDP_INI.omarchy-xrdp.bak"
+  cp -a "$SESMAN_INI" "$SESMAN_INI.omarchy-xrdp.bak"
+
+  grep -qxF "$MARK begin" "$XRDP_INI" || rewrite "$XRDP_INI" xrdp_ini_add
+  if ! grep -q "^$MARK was: " "$SESMAN_INI"; then
+    rewrite "$SESMAN_INI" sesman_set Globals DefaultWindowManager "$LIBDIR/omarchy-xrdp-startwm"
+    rewrite "$SESMAN_INI" sesman_set Xvnc param "$LIBDIR/omarchy-xrdp-session"
+  fi
+
+  reload_sesman
+  echo "xrdp now offers the Omarchy session (default on the login screen)."
+  echo "Backups: $XRDP_INI.omarchy-xrdp.bak, $SESMAN_INI.omarchy-xrdp.bak"
+}
+
+remove() {
+  need_root remove
+  rewrite "$XRDP_INI" xrdp_ini_remove
+  rewrite "$SESMAN_INI" sesman_restore
+  reload_sesman
+  echo "Removed the Omarchy session from xrdp."
+}
+
+status() {
+  if is_set_up; then
+    echo "xrdp: Omarchy session configured"
+  else
+    echo "xrdp: Omarchy session not configured (run: sudo omarchy-xrdp setup)"
+  fi
+  echo "services: xrdp $(systemctl is-active xrdp.service), xrdp-sesman $(systemctl is-active xrdp-sesman.service)"
+
+  local found=0 dir user display
+  for dir in /run/user/*/omarchy-xrdp/*/; do
+    [[ -r $dir/pid ]] || continue
+    kill -0 "$(<"$dir/pid")" 2>/dev/null || continue
+    user=$(stat -c %U "$dir")
+    display=$(basename "$dir")
+    echo "session: $user on display :$display"
+    found=1
+  done
+  ((found)) || echo "sessions: none visible (other users' sessions need root to see)"
+}
+
+case ${1:-} in
+  setup) setup ;;
+  remove) remove ;;
+  status) status ;;
+  *)
+    echo "Usage: omarchy-xrdp setup | remove | status" >&2
+    exit 1
+    ;;
+esac
