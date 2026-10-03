@@ -7,6 +7,8 @@ Usage: vnc-input.py SOCKET ACTION...
   text:STRING     type ASCII text
   move:X,Y        move the pointer
   click:X,Y       left-click at X,Y
+  clip:TEXT       set the server clipboard (ClientCutText, Latin-1)
+  waitclip:SECS   wait for the server clipboard (ServerCutText) and print it
   sleep:SECONDS
 """
 import socket
@@ -93,6 +95,23 @@ def main():
             pointer(s, x, y)
             pointer(s, x, y, 1)
             pointer(s, x, y, 0)
+        elif kind == "clip":
+            data = arg.encode("latin-1")
+            s.sendall(struct.pack(">BxxxI", 6, len(data)) + data)
+        elif kind == "waitclip":
+            # Wait for ServerCutText (we never request framebuffer updates,
+            # so only bells and cut text arrive)
+            s.settimeout(float(arg))
+            try:
+                while True:
+                    msg = recv_exact(s, 1)[0]
+                    if msg == 3:
+                        recv_exact(s, 3)
+                        n = struct.unpack(">I", recv_exact(s, 4))[0]
+                        print("server clipboard:", recv_exact(s, n).decode("latin-1"))
+                        break
+            except socket.timeout:
+                print("no server clipboard received")
         elif kind == "sleep":
             time.sleep(float(arg))
         else:
