@@ -96,7 +96,11 @@ struct server {
 
     int32_t frame_id, frame_ack;
     bool capture_pending;
-    bool held; /* last_frame captured but not sent yet */
+    bool held; /* last_frame captured but not sent yet (experimental) */
+    /* FRAME_RATE above 60: the experimental faster pipeline (capture
+     * overlapping encoding, parallel conversion); known issues with some
+     * clients, see the README */
+    bool experimental;
     bool want_full;
     bool suppressed;
     double last_send;
@@ -380,8 +384,13 @@ static void send_gfx_h264(struct server *s, struct frame *f, bool full)
     int n = frame_rects(s, f, full, true, rects, MAX_DAMAGE_RECTS);
     if (n == 0)
         return;
-    nv12_convert_rects(s->shm, s->width, s->height, f->data, f->stride, f->width, f->height,
-                       rects, n);
+    if (s->experimental)
+        nv12_convert_rects(s->shm, s->width, s->height, f->data, f->stride, f->width, f->height,
+                           rects, n);
+    else
+        for (int i = 0; i < n; i++)
+            nv12_convert_rect(s->shm, s->width, s->height, f->data, f->stride, f->width,
+                              f->height, rects[i]);
     s->shm_dirty_all = false;
 
     int32_t id = ++s->frame_id;
@@ -796,10 +805,21 @@ static void on_frame(void *data, struct frame *f)
     struct server *s = data;
     s->capture_pending = false;
     s->last_frame = f;
-    /* The main loop sends it once xrdp is done with the previous frame and
-     * the frame interval has passed; its damage stays valid until then,
-     * since no other capture is requested meanwhile */
-    s->held = true;
+    if (s->experimental) {
+        /* The main loop sends it once xrdp is done with the previous frame
+         * and the frame interval has passed; its damage stays valid until
+         * then, since no other capture is requested meanwhile */
+        s->held = true;
+        return;
+    }
+    if (!ready_to_send(s)) {
+        /* Not deliverable now: repaint everything once we can */
+        s->want_full = true;
+        return;
+    }
+    bool full = s->want_full;
+    s->want_full = false;
+    send_frame(s, f, full);
 }
 
 static void on_cursor(void *data, struct cursor *c)
@@ -1385,6 +1405,10 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
     s.conn_fd = -1;
     s.shm_fd = -1;
     s.interval = 0.016;
+    const char *rate = getenv("OMARCHY_XRDP_FRAME_RATE");
+    s.experimental = rate && atoi(rate) > 60;
+    if (s.experimental)
+        log_info("FRAME_RATE %d: experimental faster frame pipeline", atoi(rate));
     const char *mac = getenv("OMARCHY_XRDP_MAC_SHORTCUTS");
     s.mac_shortcuts = mac && (!strcmp(mac, "yes") || !strcmp(mac, "1"));
     if (s.mac_shortcuts)
@@ -1415,10 +1439,35 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
 
     while (!s.stop) {
         int timeout = mac_timeout(&s);
-        /* Capture and encode overlap: the next capture is requested as soon
-         * as the last one is handed over (converted into xrdp's buffer), and
-         * a capture that arrives while xrdp still encodes waits for it */
-        if (ready_to_send(&s)) {
+        if (!s.experimental) {
+            /* One step at a time: capture once xrdp has the last frame
+             * encoded and the frame interval has passed */
+            if (ready_to_send(&s)) {
+                if (s.want_full && s.last_frame && !s.capture_pending) {
+                    /* Repaint from the last capture: the screen may not change */
+                    s.want_full = false;
+                    send_frame(&s, s.last_frame, true);
+                } else if (!s.capture_pending) {
+                    double wait = s.last_send + s.interval - now_s();
+                    if (wait <= 0) {
+                        wl_request_frame(s.wl, false);
+                        s.capture_pending = true;
+                    } else {
+                        int t = (int)(wait * 1000) + 1;
+                        if (timeout < 0 || t < timeout)
+                            timeout = t;
+                    }
+                } else if (s.want_full && s.last_frame) {
+                    /* A capture is waiting for screen changes; repaint meanwhile */
+                    s.want_full = false;
+                    send_frame(&s, s.last_frame, true);
+                }
+            }
+        } else if (ready_to_send(&s)) {
+            /* Experimental: capture and encode overlap. The next capture is
+             * requested as soon as the last one is handed over (converted
+             * into xrdp's buffer); one that arrives while xrdp still
+             * encodes waits for it */
             if (s.held) {
                 double wait = s.last_send + s.interval - now_s();
                 if (wait <= 0) {
@@ -1436,7 +1485,8 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
                 send_frame(&s, s.last_frame, true);
             }
         }
-        if (!s.capture_pending && !s.held && s.conn_fd >= 0 && s.have_info && !s.suppressed) {
+        if (s.experimental && !s.capture_pending && !s.held && s.conn_fd >= 0 && s.have_info &&
+            !s.suppressed) {
             wl_request_frame(s.wl, false);
             s.capture_pending = true;
         }

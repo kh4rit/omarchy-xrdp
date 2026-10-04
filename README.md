@@ -145,8 +145,7 @@ KEYBOARD=           # xkb layout overriding the client's (e.g. "de")
 RENDER_NODE=/dev/dri/renderD128
 BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and key events
 CONSOLE=yes         # no: never attach to a desktop already running locally
-FRAME_RATE=60       # frames/s sent (up to 240); e.g. 120 on a LAN. The RDP monitor
-                    # refreshes at least this often. Needs CPU: see Performance
+FRAME_RATE=60       # frames/s sent; above 60 is experimental (see Performance)
 MAC_SHORTCUTS=      # yes: when Windows App on macOS translates Command+C/X/V to Ctrl,
                     # turn those back into Super+C/X/V (Omarchy copy/cut/paste,
                     # which also works in terminals; a real Control+C stays
@@ -173,14 +172,18 @@ encoding:
 Normal desktop use needs far less bandwidth. xrdp's encoder settings live in
 `/etc/xrdp/gfx.toml` (x264 `ultrafast`/`zerolatency` by default).
 
-**Higher frame rates** (`FRAME_RATE=120` in `~/.config/omarchy/xrdp.conf`,
-for a LAN): the backend captures the next frame while xrdp encodes the
-last one and converts big updates on several cores; `omarchy-xrdp setup`
-gives x264 4 threads per screen (`threads = 4` in gfx.toml, against xrdp's
-default of 1). With every pixel changing every frame (the worst case),
-before the x264 change: 1920×1080 ~70 frames/s, 3840×2160 ~38 frames/s,
-the latter limited by x264. Typical desktop updates are much smaller.
-Whether the client shows more than 60 frames/s is up to the client.
+**Experimental: higher frame rates.** `FRAME_RATE` above 60 (e.g. 120,
+for a LAN) switches to a faster frame pipeline: the next frame is
+captured while xrdp encodes the last one, and big updates are converted on
+several cores. With every pixel changing every frame, 1920×1080 reached
+~80 frames/s. Known issues, so it is off by default:
+
+- At 4K, xrdp's single x264 thread can't keep up; more threads
+  (`threads = 4` in `/etc/xrdp/gfx.toml`) fix that, but Windows App on
+  macOS then shows corrupted (green, smeared) blocks after big changes
+  such as fast workspace switches. FreeRDP decodes the same stream fine.
+- With one x264 thread, Windows App on macOS fell seconds behind on fast
+  workspace switches.
 
 ## Limitations
 

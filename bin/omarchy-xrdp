@@ -106,22 +106,8 @@ sesman_restore() {
   '
 }
 
-# gfx.toml: in [$section], replace "$key = ..." by "$key = $value", keeping
-# the original in a marker comment (TOML comments start with #)
-gfx_set() {
-  local section=$1 key=$2 value=$3
-  awk -v mark="$GFX_MARK" -v section="[$section]" -v key="$key" -v value="$value" '
-    /^\[/ { in_section = ($0 == section) }
-    in_section && !done && $0 ~ "^" key "[ \t]*=" {
-      print mark " was: " $0
-      print key " = " value "   " mark
-      done = 1
-      next
-    }
-    { print }
-  '
-}
-
+# gfx.toml: put back lines an earlier version replaced (marker comments,
+# TOML-style)
 gfx_restore() {
   awk -v mark="$GFX_MARK" '
     index($0, mark " was: ") == 1 { print substr($0, length(mark " was: ") + 1); skip_next = 1; next }
@@ -134,7 +120,7 @@ is_set_up() {
   grep -qxF "lib=libxup.so" <(sed -n "/^$MARK begin\$/,/^$MARK end\$/p" "$XRDP_INI") &&
     grep -qF "$LIBDIR/omarchy-xrdp-xserver" "$SESMAN_INI" &&
     grep -qx "XorgNoNewPrivileges=false" "$SESMAN_INI" &&
-    { [[ ! -f $GFX_TOML ]] || grep -qF "$GFX_MARK was:" "$GFX_TOML"; }
+    { [[ ! -f $GFX_TOML ]] || ! grep -qF "$GFX_MARK" "$GFX_TOML"; }
 }
 
 reload_sesman() {
@@ -173,13 +159,10 @@ setup() {
   # it would break sudo, pkexec and polkit. omarchy-xrdp-xserver runs the
   # plain, non-setuid /usr/lib/Xorg for other desktops.
   rewrite "$SESMAN_INI" sesman_set Security XorgNoNewPrivileges false
-  # H.264: x264 on 4 threads per screen, so a 4K screen keeps up at 60 fps
-  # and more (one thread manages ~40 fps at 4K), for FRAME_RATE up to 120
-  if [[ -f $GFX_TOML ]]; then
-    rewrite "$GFX_TOML" gfx_restore
-    rewrite "$GFX_TOML" gfx_set x264.default threads 4
-    rewrite "$GFX_TOML" gfx_set x264.default fps_num 120
-  fi
+  # gfx.toml stays as xrdp ships it (0.6.0 set x264 to 4 threads, which
+  # Windows App on macOS decodes with corruption): undo that if present.
+  # The experimental FRAME_RATE above 60 may want more threads; see README.
+  [[ -f $GFX_TOML ]] && rewrite "$GFX_TOML" gfx_restore
 
   reload_sesman
   echo "xrdp now offers the Omarchy session (default on the login screen)."

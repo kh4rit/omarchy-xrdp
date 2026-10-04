@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- 60 frames/s with the proven pipeline is the default again. `FRAME_RATE`
+  above 60 turns on the faster pipeline from 0.6.0 as an **experimental**
+  feature, with known issues in Windows App on macOS (see README).
+- `omarchy-xrdp setup` no longer changes xrdp's x264 settings, and undoes
+  0.6.0's `threads = 4`, which made Windows App on macOS show corrupted
+  blocks after big screen changes.
+- Kept: xrdp's raised H.264 frame limit (0.6.1) and the frame statistics
+  in the session log (0.6.2).
+
 ## 0.6.1
 
 - Fix green, smeared blocks after big screen changes (e.g. fast workspace
