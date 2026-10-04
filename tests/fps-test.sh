@@ -32,12 +32,11 @@ target hyprctl dispatch 'hl.dsp.window.fullscreen()' >/dev/null
 sleep 2
 
 xrdp_pid=$(pgrep -u "$uid" -nx xrdp)
-client_pid=$(pgrep -u "$uid" -nx xfreerdp3)
 ticks() { awk '{print $14 + $15}' "/proc/$1/stat" 2>/dev/null || echo 0; }
-c0=$(ticks "$xrdp_pid") k0=$(ticks "$client_pid")
+c0=$(ticks "$xrdp_pid")
 sleep "$secs"
-c1=$(ticks "$xrdp_pid") k1=$(ticks "$client_pid")
-echo "xrdp CPU: $(( (c1 - c0) * 100 / $(getconf CLK_TCK) / secs ))%, test client CPU: $(( (k1 - k0) * 100 / $(getconf CLK_TCK) / secs ))% (of one core)"
+c1=$(ticks "$xrdp_pid")
+echo "xrdp CPU: $(( (c1 - c0) * 100 / $(getconf CLK_TCK) / secs ))% of one core"
 awk '/^----/ { n = 0 } { l[n++] = $0 } END { for (i = 0; i < n; i++) print l[i] }' \
   "$HOME/.local/state/omarchy-xrdp/session-20.log" | grep -a 'frames/s sent' | tail -3
 
