@@ -5,7 +5,7 @@ set -eu
 stage=${STAGE:-/tmp/omxrdp-test}
 mkdir -p "$stage/tools" "$stage/pkgs"
 cd "$stage/pkgs"
-for pkg in xdotool wlr-randr; do
+for pkg in xdotool wlr-randr xclip; do
   url=$(pacman -Sp --print-format '%l' "$pkg" | tail -1)
   file=${url##*/}
   [[ -f $file ]] || curl -sfLO "$url"

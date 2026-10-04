@@ -1,71 +1,78 @@
 # omarchy-xrdp
 
 Remote **Omarchy** desktops over RDP. A user connects with any RDP client
-(Windows Remote Desktop, Remmina, FreeRDP), logs in through xrdp, and gets
-their own Hyprland session with their Omarchy config: bar, theme, keybindings,
-tiling. It runs alongside whoever is using the machine's own screens, with no
-shared input or display.
+(Windows Remote Desktop, Windows App on macOS, Remmina, FreeRDP), logs in
+through xrdp, and gets their own Hyprland session with their Omarchy config:
+bar, theme, keybindings, tiling. It runs alongside whoever is using the
+machine's own screens, with no shared input or display, and is encoded the
+way xrdp encodes its own Xorg sessions: H.264 (or RemoteFX) through the RDP
+graphics pipeline.
 
 ## How it works
 
-xrdp can hand a session to a VNC server over a Unix socket (session `code=1`).
-omarchy-xrdp registers itself as that server:
+xrdp's own Xorg sessions use a backend, xorgxrdp, that hands frames to xrdp
+over a Unix socket (the "xup" protocol); xrdp then encodes them with its GFX
+pipeline. omarchy-xrdp provides a backend that speaks the same protocol for a
+Hyprland session:
 
 ```
-RDP client ──► xrdp ──(Unix socket)──► vnc-proxy ──► wayvnc ──► Hyprland (user's Omarchy config)
-                │                                                ▲ renders on the GPU into a
-                └─ xrdp-sesman starts, as the user:              │ virtual HEADLESS-RDP output
-                     omarchy-xrdp-session ───────────────────────┘
-                       cage (headless)  gives Hyprland a GPU render node
-                       start-hyprland   with ~/.config/hypr + the RDP output
-                       wayvnc           captures that output, injects input
-                       vnc-proxy        serves xrdp's socket, handles resizing
-                       Xwayland :N      the X display sesman/chansrv wait for
-                     omarchy-xrdp-wm    sound, and lives as long as the session
+RDP client ◄── H.264/RFX ── xrdp (xup module) ◄── shared memory frames ── omarchy-xrdp-backend
+                              │   └─ chansrv: clipboard, sound            │  captures ▲   │ injects input
+                              │                                           │           │   ▼
+                              └─ xrdp-sesman starts, as the user:          Hyprland (user's Omarchy config)
+                                   omarchy-xrdp-xserver → omarchy-xrdp-session
+                                     cage (headless)   gives Hyprland a GPU render node
+                                     start-hyprland    ~/.config/hypr + a virtual HEADLESS-RDP output
+                                     omarchy-xrdp-backend
+                                     Xwayland :N       the X display sesman/chansrv wait for
+                                   omarchy-xrdp-wm     sound, and lives as long as the session
 ```
 
-Hyprland can't start without a DRM seat or a parent Wayland compositor, and an
-RDP session has neither, so a headless `cage` acts as the parent. cage 0.3.1
-offers xdg-shell v5 while Hyprland's nested backend needs v6; the package
-builds cage with a one-line patch (`cage/xdg-shell-v6.patch`).
+`omarchy-xrdp-backend` (C):
 
-Each session runs entirely as the logged-in user. Keyboard and mouse go through
-wayvnc's virtual input devices into that user's Hyprland only.
+- captures the output with `ext-image-copy-capture` into memory xrdp maps
+  directly, converting only what changed to NV12 (H.264) or RemoteFX tiles;
+- keeps one frame in flight and captures the next once xrdp has encoded it,
+  so an idle desktop costs nothing and a busy one runs at the client's pace;
+- sends the cursor as a pointer shape, so the client draws it locally;
+- injects keyboard (RDP scancodes, with the client's keyboard layout) and
+  mouse (including smooth scrolling) through virtual input devices;
+- follows client resizes (dynamic resolution) by resizing the Hyprland output;
+- bridges the text clipboard between Hyprland and the X display where xrdp's
+  chansrv serves the RDP clipboard.
+
+Hyprland can't start without a DRM seat or a parent Wayland compositor, and
+an RDP session has neither, so a headless `cage` acts as the parent. cage
+0.3.1 offers xdg-shell v5 while Hyprland's nested backend needs v6; the
+package builds cage with a one-line patch (`cage/xdg-shell-v6.patch`).
 
 A local Omarchy login is run by uwsm, which brings up `graphical-session.target`
-(and with it Omarchy's session services: input method, crash watch, ...) and
-clears the session out of `systemd --user` at logout. In an RDP session
-`omarchy-xrdp-session.target` does that job, and a small `uwsm` shim turns
-Omarchy's logout (`uwsm stop`) into ending the RDP session.
-
-`omarchy-xrdp-vnc-proxy` exists for resizing. xrdp only resizes a VNC session
-if the server's first update describes the screen layout, which wayvnc doesn't
-do, and wayvnc's own resize path (wlr-output-management) proved unreliable
-with Hyprland. The proxy supplies the initial layout, turns xrdp's resize
-requests into Hyprland monitor rules (`omarchy-xrdp-resize`), and reports the
-result back the way xrdp expects. Everything else passes through unchanged.
+(and with it Omarchy's session services) and clears the session out of
+`systemd --user` at logout. In an RDP session `omarchy-xrdp-session.target`
+does that job, and a small `uwsm` shim turns Omarchy's logout (`uwsm stop`)
+into ending the RDP session.
 
 ## Install
 
-Requires xrdp and xorgxrdp (AUR) already installed and running.
+Requires xrdp and xorgxrdp (AUR) installed and running.
 
 ```
 ./install.sh
 ```
 
-This installs the dependencies with `omarchy pkg add`, builds and installs the
-`omarchy-xrdp` package with `makepkg -si`, and runs `sudo omarchy-xrdp setup`.
-
-`omarchy-xrdp setup` makes three marked, reversible edits:
+This installs the dependencies with `omarchy pkg add`, builds and installs
+the `omarchy-xrdp` package with `makepkg -si`, and runs
+`sudo omarchy-xrdp setup`, which makes these marked, reversible edits (and
+upgrades an earlier omarchy-xrdp setup):
 
 | File | Change |
 |---|---|
-| `/etc/xrdp/xrdp.ini` | Adds an `[Omarchy]` session before `[Xorg]`, so it is the login screen default |
-| `/etc/xrdp/sesman.ini` | `[Xvnc] param=` → `/usr/lib/omarchy-xrdp/omarchy-xrdp-session` |
-| `/etc/xrdp/sesman.ini` | `DefaultWindowManager=` → `/usr/lib/omarchy-xrdp/omarchy-xrdp-startwm` (falls back to `startwm.sh` for other session types, so Xorg/XFCE keeps working) |
+| `/etc/xrdp/xrdp.ini` | Adds an `[Omarchy]` session (`lib=libxup.so`, `code=20`) as the login screen default; comments out the `[Xorg]` entry, which would now lead to the same place |
+| `/etc/xrdp/sesman.ini` | `[Xorg] param=` → `omarchy-xrdp-xserver`: Omarchy for users with an Omarchy config, stock Xorg otherwise |
+| `/etc/xrdp/sesman.ini` | `DefaultWindowManager=` → `omarchy-xrdp-startwm` (falls back to `startwm.sh`, so Xorg/XFCE sessions keep working) |
 
 Running sessions aren't affected: setup reloads xrdp-sesman instead of
-restarting it.
+restarting it. `sudo omarchy-xrdp remove` puts the files back exactly.
 
 Users need Omarchy's config in their home (new accounts get it from
 `/etc/skel`) and, if sesman restricts logins to a group, membership in it
@@ -76,42 +83,53 @@ Users need Omarchy's config in their home (new accounts get it from
 Connect to port 3389, pick **Omarchy** (the default) and log in.
 
 - The desktop follows the RDP window: its size at login, when the window is
-  resized (with the client's dynamic resolution, the default in Windows Remote
-  Desktop), and when reconnecting from a different screen.
-- Omarchy's **Logout** ends the RDP session. Just closing the RDP window leaves
-  the session running, and the next login reconnects to it.
-- The Windows key reaches Omarchy when Remote Desktop is full screen (or with
-  "Apply Windows key combinations: On the remote computer").
+  resized (dynamic resolution), and when reconnecting from another screen.
+- Omarchy's **Logout** ends the RDP session. Closing the RDP window leaves it
+  running; the next login reconnects to it.
+- **Super** shortcuts and Super+drag need the client to send the Windows key.
+  Windows Remote Desktop does when full screen (or with "Apply Windows key
+  combinations: On the remote computer"). Windows App on macOS sends
+  Command as the Windows key in its **Scancode** keyboard mode (Settings →
+  General → Keyboard mode); in Unicode mode Command may arrive as Ctrl.
 - After the idle timeout Omarchy locks the session; unlock with the user's
   password.
 
 Per-user settings go in `~/.config/omarchy/xrdp.conf`:
 
 ```bash
+DESKTOP=omarchy     # xorg: use stock Xorg/xorgxrdp (e.g. XFCE via ~/.xinitrc) instead
 SCALE=auto          # auto: 1 below 2560 px wide, 1.5 below 3200, else 2
-KEYBOARD=us         # xkb layout (and -variant) for wayvnc's virtual keyboard
-MAX_FPS=60
+KEYBOARD=           # xkb layout overriding the client's (e.g. "de")
 RENDER_NODE=/dev/dri/renderD128
-RESIZE=yes          # no: skip the proxy, the desktop keeps its login size
-WAYVNC_LOG=warning  # wayvnc --log-level, e.g. debug
-PROXY_DEBUG=        # 1: log the proxy's resize handling
+BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and unmapped keys
 ```
 
 Logs: `~/.local/state/omarchy-xrdp/session-<display>.log` for each session,
 plus the usual `/var/log/xrdp*.log`. `omarchy-xrdp status` shows the setup
 and running sessions.
 
+## Performance
+
+Measured on this setup (Core Ultra 9 285, Intel graphics) with a full-screen
+terminal scrolling random text at 1920×1080, a near worst case for video
+encoding:
+
+| | Earlier VNC-based version | Native backend |
+|---|---|---|
+| Bandwidth to the client | 96.5 Mbit/s | 13–39 Mbit/s (H.264) |
+| Frames delivered | ~4/s | ~30/s (bounded by the test content) |
+| Backend time per frame | — | ~3 ms convert + send, ~4 ms until xrdp has encoded it |
+
+Normal desktop use needs far less bandwidth. xrdp's encoder settings live in
+`/etc/xrdp/gfx.toml` (x264 `ultrafast`/`zerolatency` by default).
+
 ## Limitations
 
-- **Single monitor.** The session is one screen; multi-monitor RDP setups
-  are untested.
-- **Clipboard** goes through xrdp's VNC clipboard, which is Latin-1 text only.
-- **Sound** uses pipewire-module-xrdp, which is per user: two simultaneous
-  sessions of the same user share (and fight over) one sink.
 - **One RDP session per user** is the sensible setup; Omarchy's systemd
-  `--user` environment is shared between a user's sessions.
-- Takes over sesman's `[Xvnc]` session type, so TigerVNC-backed Xvnc sessions
-  are no longer available.
+  `--user` environment is shared between a user's sessions, and so is the
+  xrdp sound sink (pipewire-module-xrdp).
+- **Single monitor.** Multi-monitor clients get one screen.
+- **Clipboard** is text only.
 - XDG autostart entries (`~/.config/autostart`, `/etc/xdg/autostart`) don't
   run; Omarchy's own autostart (in the Hyprland config) does.
 
@@ -124,19 +142,20 @@ sudo pacman -R omarchy-xrdp
 
 ## Development
 
-`tests/` runs everything without root:
+Build the backend with `meson setup backend/build backend && ninja -C
+backend/build`. `tests/` runs everything without root:
 
-- `tests/stage.sh` copies the scripts to `/tmp/omxrdp-test`;
-  `start-test-session.sh` launches a session the way xrdp-sesman does
-  (`sesman-emulate.sh`) as a transient `systemd --user` unit of the test user.
-- `tests/rdp-client.sh` runs FreeRDP inside a private headless cage, driven
-  with xdotool and captured with grim, against an unprivileged xrdp instance.
-  Use `RDP_CLIENT=xfreerdp3` (the SDL client draws nothing in a headless
-  cage). The first input event after connecting only gives the X11 client
-  focus, so click or send a throwaway key before typing.
-- `tests/vnc-probe.py` / `tests/vnc-input.py` talk RFB to the session socket
-  directly.
-- `tests/resize-scenario.sh` repeatedly connects at a new size and checks the
-  session follows.
-- `tests/ini-roundtrip.sh` checks `setup` and `remove` against copies of the
+- `tests/stage.sh` copies the scripts and the built backend to
+  `/tmp/omxrdp-test`; `start-test-session.sh` launches a session the way
+  xrdp-sesman does (`sesman-emulate.sh`) as a transient `systemd --user`
+  unit of the test user (who needs lingering, `loginctl enable-linger`).
+- An unprivileged xrdp with `lib=libxup.so` and `port=` set to the session's
+  socket serves it on another port; `tests/rdp-client.sh` runs FreeRDP
+  (`RDP_CLIENT=xfreerdp3`) inside a private headless cage, driven with
+  xdotool and captured with grim (`tests/fetch-tools.sh` fetches the tools).
+  The first input event after connecting only gives that client focus.
+- `tests/e2e.sh` checks session start, resize, typing, Super+drag, clipboard,
+  reload and logout; `tests/perf.sh` measures bandwidth and CPU under load;
+  `tests/ini-roundtrip.sh` checks `setup`/`remove` against copies of the
   installed ini files.
+- `omarchy-xrdp-backend --bench SECONDS` measures capture alone.

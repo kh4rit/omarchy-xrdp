@@ -283,6 +283,8 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
             wl_registry_bind(reg, name, &ext_output_image_capture_source_manager_v1_interface, 1);
     } else if (!strcmp(iface, ext_image_copy_capture_manager_v1_interface.name)) {
         ctx->copy_manager = wl_registry_bind(reg, name, &ext_image_copy_capture_manager_v1_interface, 1);
+    } else if (!strcmp(iface, ext_data_control_manager_v1_interface.name)) {
+        ctx->data_control_manager = wl_registry_bind(reg, name, &ext_data_control_manager_v1_interface, 1);
     } else if (!strcmp(iface, zwp_virtual_keyboard_manager_v1_interface.name)) {
         ctx->vkbd_manager = wl_registry_bind(reg, name, &zwp_virtual_keyboard_manager_v1_interface, 1);
     } else if (!strcmp(iface, zwlr_virtual_pointer_manager_v1_interface.name)) {

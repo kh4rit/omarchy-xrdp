@@ -1,14 +1,14 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
 arch=(x86_64)
 url="https://github.com/cage-kiosk/cage"
 license=(MIT)
-depends=(xrdp hyprland wayvnc wlroots0.20 xorg-xwayland xorg-xauth jq procps-ng bash python)
+depends=(xrdp hyprland wlroots0.20 wayland libxkbcommon libxcb xorg-xwayland xorg-xauth jq procps-ng bash)
 makedepends=(meson ninja wayland-protocols)
 optdepends=('pipewire-module-xrdp: sound in RDP sessions')
 options=(!debug)
@@ -20,18 +20,22 @@ prepare() {
 }
 
 build() {
-  meson setup --prefix=/usr --buildtype=plain -Dman-pages=disabled build "cage-$_cagever"
-  meson compile -C build
+  meson setup --prefix=/usr --buildtype=plain -Dman-pages=disabled build-cage "cage-$_cagever"
+  meson compile -C build-cage
+  # xrdp's headers (xrdp_client_info.h) come with the xrdp package
+  meson setup --prefix=/usr --buildtype=plain build-backend "$startdir/backend"
+  meson compile -C build-backend
 }
 
 package() {
   local lib="$pkgdir/usr/lib/omarchy-xrdp"
 
-  install -Dm755 build/cage "$lib/cage"
+  install -Dm755 build-cage/cage "$lib/cage"
   install -Dm644 "cage-$_cagever/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.cage"
+  install -Dm755 build-backend/omarchy-xrdp-backend "$lib/omarchy-xrdp-backend"
 
-  for script in omarchy-xrdp-session omarchy-xrdp-compositor omarchy-xrdp-startwm omarchy-xrdp-wm \
-    omarchy-xrdp-resize omarchy-xrdp-vnc-proxy; do
+  for script in omarchy-xrdp-xserver omarchy-xrdp-session omarchy-xrdp-compositor \
+    omarchy-xrdp-startwm omarchy-xrdp-wm omarchy-xrdp-resize; do
     install -Dm755 "$startdir/bin/$script" "$lib/$script"
   done
   install -Dm755 "$startdir/shims/uwsm" "$lib/shims/uwsm"

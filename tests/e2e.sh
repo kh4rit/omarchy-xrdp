@@ -47,6 +47,9 @@ rm -f "$marker"
 sleep 1.5
 check "typing reaches the session" "typed-over-rdp" "$(cat "$marker" 2>/dev/null)"
 
+check "clipboard syncs both ways with xrdp's X display" "0" \
+  "$(as_user "$stage/tests/clip-test.sh" 20 >/dev/null 2>&1; echo $?)"
+
 check "Super+drag (Command-drag on a Mac) moves a window" "PASS" \
   "$("$stage/tests/drag-test.sh" "$user" 2>/dev/null | grep -oE '^(PASS|FAIL)')"
 

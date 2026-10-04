@@ -22,6 +22,7 @@
 #include <xrdp_constants.h>
 
 #include "backend.h"
+#include "clipboard.h"
 #include "color.h"
 
 /* xrdp → server message types */
@@ -1111,6 +1112,9 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
     s.wl = wl_start(output, &cb, &s);
     if (!s.wl)
         return 1;
+    /* xrdp's chansrv serves the RDP clipboard on the session's X display */
+    const char *display = getenv("OMARCHY_XRDP_DISPLAY");
+    struct clip *clip = display ? clip_start(s.wl, atoi(display)) : NULL;
     s.listen_fd = listen_on(socket_path);
     if (s.listen_fd < 0)
         return 1;
@@ -1140,14 +1144,21 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
         if (s.cursor_dirty && s.cursor && s.conn_fd >= 0 && s.have_info && !s.suppressed)
             send_cursor(&s);
 
+        /* The clipboard's X display appears after we start: keep trying */
+        int x_fd = clip ? clip_x_fd(clip) : -1;
+        if (clip && x_fd < 0 && (timeout < 0 || timeout > 1000))
+            timeout = 1000;
+
         if (wl_prepare(s.wl) < 0)
             break;
-        struct pollfd fds[3] = {
+        struct pollfd fds[5] = {
             {.fd = wl_fd(s.wl), .events = POLLIN},
             {.fd = s.listen_fd, .events = POLLIN},
             {.fd = s.conn_fd, .events = POLLIN},
+            {.fd = x_fd, .events = POLLIN},
+            {.fd = clip ? clip_read_fd(clip) : -1, .events = POLLIN},
         };
-        int r = poll(fds, s.conn_fd >= 0 ? 3 : 2, timeout);
+        int r = poll(fds, 5, timeout);
         if (r < 0 && errno != EINTR) {
             wl_after_poll(s.wl, false);
             break;
@@ -1160,6 +1171,13 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
             accept_connection(&s);
         if (r > 0 && s.conn_fd >= 0 && (fds[2].revents & (POLLIN | POLLHUP | POLLERR)))
             read_connection(&s);
+        if (clip) {
+            /* xcb may have queued events while we talked to it */
+            if (x_fd >= 0)
+                clip_dispatch_x(clip);
+            if (r > 0 && fds[4].fd >= 0 && (fds[4].revents & (POLLIN | POLLHUP | POLLERR)))
+                clip_dispatch_read(clip);
+        }
     }
     drop_connection(&s, "shutting down");
     unlink(socket_path);

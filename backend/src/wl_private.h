@@ -2,6 +2,7 @@
 
 #include <wayland-client.h>
 
+#include "ext-data-control-v1-client-protocol.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
 #include "virtual-keyboard-unstable-v1-client-protocol.h"
@@ -52,6 +53,7 @@ struct wl_ctx {
     int n_outputs;
     struct wl_output *output;
 
+    struct ext_data_control_manager_v1 *data_control_manager; /* clipboard.c */
     struct ext_output_image_capture_source_manager_v1 *source_manager;
     struct ext_image_copy_capture_manager_v1 *copy_manager;
     struct ext_image_capture_source_v1 *source;

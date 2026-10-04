@@ -7,11 +7,14 @@ add_project_arguments('-D_GNU_SOURCE', '-Wno-unused-parameter', language: 'c')
 
 wayland_client = dependency('wayland-client')
 xkbcommon = dependency('xkbcommon')
+xcb = dependency('xcb')
+xcb_xfixes = dependency('xcb-xfixes')
 wayland_protocols = dependency('wayland-protocols')
 wayland_scanner = find_program('wayland-scanner')
 
 wp_dir = wayland_protocols.get_variable('pkgdatadir')
 protocols = [
+  wp_dir / 'staging/ext-data-control/ext-data-control-v1.xml',
   wp_dir / 'staging/ext-foreign-toplevel-list/ext-foreign-toplevel-list-v1.xml',
   wp_dir / 'staging/ext-image-capture-source/ext-image-capture-source-v1.xml',
   wp_dir / 'staging/ext-image-copy-capture/ext-image-copy-capture-v1.xml',
@@ -32,6 +35,6 @@ endforeach
 
 executable('omarchy-xrdp-backend',
   'src/main.c', 'src/wayland.c', 'src/cursor.c', 'src/input.c', 'src/xup.c', 'src/keymap.c',
-  'src/color.c',
+  'src/color.c', 'src/clipboard.c',
   protocol_sources,
-  dependencies: [wayland_client, xkbcommon])
+  dependencies: [wayland_client, xkbcommon, xcb, xcb_xfixes])
