@@ -99,6 +99,7 @@ struct server {
     bool want_full;
     bool suppressed;
     double last_send;
+    double last_resize; /* when we last ran the resize command */
     double interval;
 
     struct frame *last_frame; /* most recent capture, still in the capture buffer */
@@ -842,6 +843,7 @@ static void run_resize(struct server *s, int w, int h, bool force)
         execlp(s->resize_cmd, s->resize_cmd, ws, hs, (char *)NULL);
         _exit(127);
     }
+    s->last_resize = now_s();
     log_info("resizing output to %dx%d", w, h);
 }
 
@@ -884,7 +886,10 @@ static void hypr_events_read(struct server *s, int *fd)
             }
             line[len] = 0;
             len = 0;
-            if (!strncmp(line, "configreloaded>>", 16) && s->width > 0) {
+            /* The resize command's own hyprctl evals count as reloads too:
+             * reacting to those would feed back into another resize */
+            if (!strncmp(line, "configreloaded>>", 16) && s->width > 0 &&
+                now_s() - s->last_resize > 2.0) {
                 log_info("Hyprland reloaded its config, reapplying the RDP monitor");
                 run_resize(s, s->width, s->height, true);
             }
