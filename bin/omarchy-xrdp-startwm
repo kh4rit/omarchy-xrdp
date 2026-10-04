@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/sh
 
 # xrdp-sesman's window manager step (sesman.ini DefaultWindowManager).
 # Omarchy sessions already have Hyprland running, so hand over to the session

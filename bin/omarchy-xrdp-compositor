@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Runs inside the headless cage: records cage's Wayland socket and the
 # start-hyprland PID for omarchy-xrdp-session, then becomes start-hyprland.

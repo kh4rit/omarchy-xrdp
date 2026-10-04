@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # In an omarchy-xrdp session Hyprland is started by omarchy-xrdp-session, not
 # uwsm, so Omarchy's logout (`uwsm stop`) would leave it running. Turn that

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Window manager step for an Omarchy RDP session. Hyprland was already started
 # by omarchy-xrdp-session; this runs with the full login environment (sesman

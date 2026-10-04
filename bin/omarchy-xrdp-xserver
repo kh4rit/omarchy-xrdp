@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # xrdp-sesman's X server for Xorg-type sessions (sesman.ini [Xorg] param).
 # Users with an Omarchy config get an Omarchy desktop served by

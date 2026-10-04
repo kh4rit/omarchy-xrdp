@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Serve a user's live local desktop (the Hyprland already running on the
 # machine's screens) to an xrdp session: "console mode".

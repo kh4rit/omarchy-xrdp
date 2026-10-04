@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Configure xrdp to offer Omarchy (Hyprland) desktops.
 #

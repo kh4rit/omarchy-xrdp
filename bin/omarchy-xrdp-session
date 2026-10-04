@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Start an Omarchy (Hyprland) desktop for an xrdp session.
 #

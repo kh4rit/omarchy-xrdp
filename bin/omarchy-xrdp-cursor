@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Switch the Hyprland of an RDP session (HYPRLAND_INSTANCE_SIGNATURE) to the
 # invisible omarchy-xrdp-hidden cursor theme, and back.
