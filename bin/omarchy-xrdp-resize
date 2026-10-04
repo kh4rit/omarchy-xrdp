@@ -26,6 +26,7 @@ if [[ ! $width =~ ^[0-9]+$ || ! $height =~ ^[0-9]+$ ]]; then
 fi
 
 SCALE=auto
+FRAME_RATE=60
 config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
 [[ -r $config ]] && source "$config"
 
@@ -39,7 +40,10 @@ position=0x0
 [[ -n ${OMARCHY_XRDP_CONSOLE:-} ]] && position=auto
 
 output=${OMARCHY_XRDP_OUTPUT:-HEADLESS-RDP}
-rule="hl.monitor({ output = \"$output\", mode = \"${width}x${height}@60\", position = \"$position\", scale = $scale })"
+# The virtual monitor renders at least as often as frames are sent
+refresh=60
+[[ $FRAME_RATE =~ ^[0-9]+$ ]] && ((FRAME_RATE > 60 && FRAME_RATE <= 240)) && refresh=$FRAME_RATE
+rule="hl.monitor({ output = \"$output\", mode = \"${width}x${height}@$refresh\", position = \"$position\", scale = $scale })"
 
 if ((print_only)); then
   # A session's initial rule: record its scale for the backend
