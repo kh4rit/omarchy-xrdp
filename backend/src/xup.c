@@ -986,13 +986,28 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
              * is the usual question with Mac clients; log each one's first
              * press. Only modifiers, never what is typed. */
             static bool seen[2][128];
+            static bool held[2][128]; /* Ctrl, Alt or Win keys down */
+            static int logged;
             int sc = p3 & 0x7f, ext = !!(p4 & KBD_FLAG_EXT);
-            bool modifier = sc == 0x1d || sc == 0x2a || sc == 0x36 || sc == 0x38 || sc == 0x5b ||
-                            sc == 0x5c;
-            if (modifier && msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP) && !seen[ext][sc]) {
+            bool down = msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP);
+            bool shift = sc == 0x2a || sc == 0x36;
+            bool chord_mod = sc == 0x1d || sc == 0x38 || sc == 0x5b || sc == 0x5c;
+            if ((shift || chord_mod) && down && !seen[ext][sc]) {
                 seen[ext][sc] = true;
                 log_info("modifier key: scancode 0x%02x%s (flags 0x%04x, keysym 0x%x)", sc,
                          ext ? " extended" : "", p4, p2);
+            }
+            /* Shortcuts: Ctrl/Alt/Win transitions and the keys pressed while
+             * one is held, never plain or Shift typing (the first 300) */
+            if (chord_mod) {
+                if (logged++ < 300)
+                    log_info("shortcut: %s 0x%02x%s", down ? "down" : "up", sc, ext ? "e" : "");
+                held[ext][sc] = down;
+            } else if ((held[0][0x1d] || held[1][0x1d] || held[0][0x38] || held[1][0x38] ||
+                        held[1][0x5b] || held[1][0x5c] || held[0][0x5b] || held[0][0x5c]) &&
+                       !shift && logged++ < 300) {
+                log_info("shortcut: %s 0x%02x%s with a modifier held", down ? "down" : "up", sc,
+                         ext ? "e" : "");
             }
         }
         key_event(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
