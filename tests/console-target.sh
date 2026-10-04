@@ -17,6 +17,8 @@ hl.config({
   ecosystem = { no_update_news = true, no_donation_nag = true },
 })
 hl.bind("SUPER + Return", hl.dsp.exec_cmd("touch $dir/remote-key"))
+-- Stands in for Omarchy's universal paste
+hl.bind("SUPER + V", hl.dsp.exec_cmd("touch $dir/super-v"))
 EOC
     systemctl --user stop omxrdp-console-target 2>/dev/null
     systemd-run --user --quiet --collect --unit=omxrdp-console-target \

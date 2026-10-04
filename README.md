@@ -97,8 +97,11 @@ Connect to port 3389, pick **Omarchy** (the default) and log in.
 - **Super** shortcuts and Super+drag need the client to send the Windows key.
   Windows Remote Desktop does when full screen (or with "Apply Windows key
   combinations: On the remote computer"). Windows App on macOS sends
-  Command as the Windows key in its **Scancode** keyboard mode (Settings →
-  General → Keyboard mode); in Unicode mode Command may arrive as Ctrl.
+  Command as the Windows key, except that it always turns Command+C, X, V,
+  A, Z, F and W into Ctrl shortcuts (there is no setting); set
+  `MAC_SHORTCUTS=yes` (below) so Command+C/X/V copy and paste in terminals
+  too. It also never holds Command during a mouse drag, so Command+drag
+  can't move windows from Windows App.
 - After the idle timeout Omarchy locks the session; unlock with the user's
   password.
 
@@ -132,6 +135,9 @@ KEYBOARD=           # xkb layout overriding the client's (e.g. "de")
 RENDER_NODE=/dev/dri/renderD128
 BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and key events
 CONSOLE=yes         # no: never attach to a desktop already running locally
+MAC_SHORTCUTS=      # yes: Windows App on macOS sends Command+C/X/V as Ctrl+C/X/V;
+                    # turn those back into Super+C/X/V (Omarchy copy/cut/paste,
+                    # which also works in terminals). A real Control+C stays Ctrl.
 ```
 
 Logs: `~/.local/state/omarchy-xrdp/session-<display>.log` for each session,

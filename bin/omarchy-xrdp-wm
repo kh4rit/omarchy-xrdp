@@ -13,7 +13,8 @@ session_pid=$(<"$state/pid")
 
 # Play the session's sound on the RDP client
 pw_loader=/usr/lib/pipewire-module-xrdp/load_pw_modules.sh
-if [[ -x $pw_loader ]]; then
+# (tests skip it: a test session must not touch the user's real audio)
+if [[ -x $pw_loader && -z ${OMARCHY_XRDP_NO_SOUND:-} ]]; then
   "$pw_loader" >/dev/null 2>&1 &
 fi
 

@@ -111,6 +111,17 @@ struct server {
     bool stop;
     bool local_activity; /* console mode: the machine was used locally */
 
+    /* MAC_SHORTCUTS: Windows App on macOS turns Command+C/X/V into
+     * Ctrl+C/X/V; key events held back while we tell those apart */
+    bool mac_shortcuts;
+    struct {
+        int scancode;
+        uint32_t flags;
+        bool down;
+        double at;
+    } held_back[3];
+    int n_held_back;
+
     long frames_sent;
     double stats_start;
     double sent_at;       /* when the frame in flight was sent */
@@ -945,8 +956,94 @@ static void key_event(struct server *s, int scancode, uint32_t flags, bool down)
     wl_key(s->wl, code, down);
 }
 
+/* ---- Mac clients: Command+C/X/V ------------------------------------------- */
+
+/* Windows App on macOS sends Command+C, Command+X and Command+V as Ctrl+C/X/V
+ * (Microsoft documents it; there is no setting). Those are no clipboard
+ * shortcuts in a terminal, so with MAC_SHORTCUTS they become Super+C/X/V,
+ * Omarchy's universal copy, cut and paste, as Command would at the machine.
+ * They are machine-made: Ctrl down, key down, key up, Ctrl up, each step
+ * within a few tens of milliseconds, where a real Control+C holds its keys
+ * far longer. Real Ctrl presses are only delayed while that can't be told. */
+#define MAC_STEP 0.05
+#define SC_CTRL 0x1d
+#define SC_LWIN 0x5b
+
+static bool mac_clipboard_key(int scancode)
+{
+    return scancode == 0x2e || scancode == 0x2d || scancode == 0x2f; /* C X V */
+}
+
+static void mac_flush(struct server *s)
+{
+    int n = s->n_held_back;
+    s->n_held_back = 0;
+    for (int i = 0; i < n; i++)
+        key_event(s, s->held_back[i].scancode, s->held_back[i].flags, s->held_back[i].down);
+}
+
+static bool other_modifiers_down(struct server *s)
+{
+    return s->key_down[KEY_LEFTSHIFT] || s->key_down[KEY_RIGHTSHIFT] ||
+           s->key_down[KEY_LEFTALT] || s->key_down[KEY_RIGHTALT] ||
+           s->key_down[KEY_LEFTMETA] || s->key_down[KEY_RIGHTMETA] ||
+           s->key_down[KEY_LEFTCTRL] || s->key_down[KEY_RIGHTCTRL];
+}
+
+static void mac_key(struct server *s, int scancode, uint32_t flags, bool down)
+{
+    double now = now_s();
+    bool ext = flags & KBD_FLAG_EXT;
+    int n = s->n_held_back;
+    double since = n ? now - s->held_back[n - 1].at : 0;
+    bool fits = false;
+
+    if (n == 0)
+        fits = down && scancode == SC_CTRL && !ext && !other_modifiers_down(s);
+    else if (n == 1)
+        fits = down && !ext && mac_clipboard_key(scancode) && since <= MAC_STEP;
+    else if (n == 2)
+        fits = !down && scancode == s->held_back[1].scancode && since <= MAC_STEP;
+
+    if (n == 3 && !down && scancode == SC_CTRL && !ext && since <= MAC_STEP) {
+        int key = s->held_back[1].scancode;
+        s->n_held_back = 0;
+        log_debug("Command+%s from the client: sending Super", key == 0x2e ? "C" : key == 0x2d ? "X" : "V");
+        key_event(s, SC_LWIN, KBD_FLAG_EXT, true);
+        key_event(s, key, 0, true);
+        key_event(s, key, 0, false);
+        key_event(s, SC_LWIN, KBD_FLAG_EXT, false);
+        return;
+    }
+    if (fits) {
+        s->held_back[n].scancode = scancode;
+        s->held_back[n].flags = flags;
+        s->held_back[n].down = down;
+        s->held_back[n].at = now;
+        s->n_held_back++;
+        return;
+    }
+    /* Not the pattern: everything as it came */
+    mac_flush(s);
+    key_event(s, scancode, flags, down);
+}
+
+/* Time left before held-back keys must go out as they are (ms, -1: none) */
+static int mac_timeout(struct server *s)
+{
+    if (!s->n_held_back)
+        return -1;
+    double left = s->held_back[s->n_held_back - 1].at + MAC_STEP - now_s();
+    if (left <= 0) {
+        mac_flush(s);
+        return -1;
+    }
+    return (int)(left * 1000) + 1;
+}
+
 static void release_all_keys(struct server *s)
 {
+    mac_flush(s);
     for (int code = 0; code <= KEY_MAX; code++) {
         if (s->key_down[code]) {
             s->key_down[code] = 0;
@@ -980,6 +1077,9 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
     memcpy(&p2, p + 8, 4);
     memcpy(&p3, p + 12, 4);
     memcpy(&p4, p + 16, 4);
+
+    if (s->n_held_back && msg != EV_KEYDOWN && msg != EV_KEYUP)
+        mac_flush(s);
 
     switch (msg) {
     case EV_KEYDOWN:
@@ -1015,7 +1115,10 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
                          ext ? "e" : "");
             }
         }
-        key_event(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
+        if (s->mac_shortcuts)
+            mac_key(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
+        else
+            key_event(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
         return;
     case EV_KEYSYNC:
         key_sync(s, p1);
@@ -1272,6 +1375,10 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
     s.conn_fd = -1;
     s.shm_fd = -1;
     s.interval = 0.016;
+    const char *mac = getenv("OMARCHY_XRDP_MAC_SHORTCUTS");
+    s.mac_shortcuts = mac && (!strcmp(mac, "yes") || !strcmp(mac, "1"));
+    if (s.mac_shortcuts)
+        log_info("Mac shortcuts: Command+C/X/V from the client become Super+C/X/V");
 
     struct sigaction sa = {.sa_handler = SIG_IGN, .sa_flags = SA_NOCLDWAIT};
     sigaction(SIGCHLD, &sa, NULL);
@@ -1297,7 +1404,7 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
     log_info("listening on %s", socket_path);
 
     while (!s.stop) {
-        int timeout = -1;
+        int timeout = mac_timeout(&s);
         if (ready_to_send(&s)) {
             if (s.want_full && s.last_frame && !s.capture_pending) {
                 /* Repaint from the last capture: the screen may not change */
@@ -1309,7 +1416,9 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
                     wl_request_frame(s.wl, false);
                     s.capture_pending = true;
                 } else {
-                    timeout = (int)(wait * 1000) + 1;
+                    int t = (int)(wait * 1000) + 1;
+                    if (timeout < 0 || t < timeout)
+                        timeout = t;
                 }
             } else if (s.want_full && s.last_frame) {
                 /* A capture is waiting for screen changes; repaint meanwhile */

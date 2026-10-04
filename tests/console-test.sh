@@ -10,7 +10,7 @@ stage=${STAGE:-/tmp/omxrdp-test}
 client=$stage/tests/rdp-client.sh
 uid=$(id -u "$user")
 target_dir=$stage/console-target-$uid
-as_user() { sudo -n -u "$user" "$@"; }
+as_user() { if [[ $user == "$(id -un)" ]]; then "$@"; else sudo -n -u "$user" "$@"; fi; }
 target() { as_user "$stage/tests/console-target.sh" "$@"; }
 monitors() { target hyprctl -j monitors; }
 rdp_size() { monitors | jq -r '.[] | select(.name == "HEADLESS-RDP") | "\(.width)x\(.height)"'; }
@@ -37,7 +37,7 @@ target stop
 target start >/dev/null || exit 1
 local_mon=LOCAL-1
 sig=$(as_user cat "$target_dir/sig")
-as_user env OMARCHY_XRDP_ATTACH="$sig" OMARCHY_XRDP_LOCK="touch $target_dir/locked" \
+as_user env OMARCHY_XRDP_ATTACH="$sig" OMARCHY_XRDP_LOCK="touch $target_dir/locked" OMARCHY_XRDP_NO_SOUND=1 \
   "$stage/start" 20 1600x900 >/dev/null
 check "console session starts" "1600x900" "$(rdp_size)"
 check "local monitor is dark" "false" \
@@ -61,7 +61,8 @@ check "remote input isn't local input" "yes" "$(session_live)"
 
 # The client draws the cursor; the backend follows its shape (needs
 # BACKEND_DEBUG=1 in the test user's xrdp.conf for the log lines)
-check "hidden cursor theme in use" "yes" \
+debug=$(session_log | grep -q 'input activity, ' && echo yes)  # a debug-only line
+[[ -n $debug ]] && check "hidden cursor theme in use" "yes" \
   "$(session_log | grep -q 'cursor shape default' && echo yes)"
 target hyprctl dispatch 'hl.dsp.exec_cmd("foot")' >/dev/null
 sleep 2
@@ -69,10 +70,41 @@ sleep 2
 sleep 0.5
 "$client" xtype mousemove 660 380
 sleep 2
+if [[ -n $debug ]]; then
 check "text cursor over a terminal" "yes" "$(session_log | grep -q 'cursor shape text' && echo yes)"
 check "cursor image at the session scale" "${CURSOR_PX:-24}x${CURSOR_PX:-24}" \
   "$(session_log | sed -n 's/.*cursor shape text (\(.*\))/\1/p' | tail -1)"
+fi
 check "GTK cursor theme untouched" "$gtk_theme" "$(as_user dconf read /org/gnome/desktop/interface/cursor-theme)"
+
+# MAC_SHORTCUTS=yes in the test user's xrdp.conf: Windows App's Ctrl+V burst
+# (its Command+V) becomes Super+V; a real (slow) Control+C stays Ctrl+C
+if session_log | grep -q 'Mac shortcuts:'; then
+  out=$stage/mac-typed-$RANDOM
+  "$client" xtype type "cat > $out"
+  "$client" xtype key Return
+  sleep 0.5
+  "$client" xtype keydown ctrl keydown v keyup v keyup ctrl
+  sleep 1
+  check "Command+V (Ctrl+V burst) arrives as Super+V" "yes" \
+    "$(as_user test -e "$target_dir/super-v" && echo yes)"
+  "$client" xtype type "x"
+  "$client" xtype key Return
+  sleep 0.3
+  "$client" xtype keydown ctrl
+  sleep 0.3
+  "$client" xtype keydown c
+  sleep 0.15
+  "$client" xtype keyup c
+  sleep 0.2
+  "$client" xtype keyup ctrl
+  sleep 0.5
+  "$client" xtype type "still running"
+  "$client" xtype key Return
+  sleep 1
+  check "a real Control+C still interrupts" "x" "$(as_user cat "$out" 2>/dev/null)"
+  as_user rm -f "$out"
+fi
 
 target hyprctl reload >/dev/null
 sleep 3
