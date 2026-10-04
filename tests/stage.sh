@@ -10,6 +10,8 @@ cp --preserve=mode "$root"/bin/* "$stage/lib/"
 cp --preserve=mode "$root"/shims/* "$stage/lib/shims/"
 cp --preserve=mode "$root"/tests/*.sh "$root"/tests/*.py "$stage/tests/"
 cp "$root"/systemd/* "$stage/systemd/"
+# The invisible cursor theme (found through XCURSOR_PATH in tests)
+python3 "$root/cursor-theme/generate.py" "$stage/icons/omarchy-xrdp-hidden"
 if [[ -x $root/backend/build/omarchy-xrdp-backend ]]; then
   cp "$root/backend/build/omarchy-xrdp-backend" "$stage/lib/.backend.new"
   mv -f "$stage/lib/.backend.new" "$stage/lib/omarchy-xrdp-backend"
@@ -26,6 +28,7 @@ ld_path=""
 cat >"$stage/start" <<EOS
 #!/bin/bash
 export OMARCHY_XRDP_LIBDIR=$stage/lib
+export XCURSOR_PATH=$stage/icons:/usr/share/icons
 ${ld_path:+export LD_LIBRARY_PATH=$ld_path}
 exec $stage/tests/start-test-session.sh "\$@"
 EOS

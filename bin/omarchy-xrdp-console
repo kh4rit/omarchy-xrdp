@@ -105,6 +105,8 @@ echo "$hypr_wayland" >"$state/wayland"
 option() { hyprctl -j getoption "misc:$1" 2>/dev/null | jq -r '.bool // .int // empty'; }
 saved_key_dpms=$(option key_press_enables_dpms)
 saved_mouse_dpms=$(option mouse_move_enables_dpms)
+saved_gsettings_sync=$(hyprctl -j getoption cursor:sync_gsettings_theme 2>/dev/null | jq -r '.bool // empty')
+cursor_theme=""
 
 pids=()
 cleanup() {
@@ -113,6 +115,7 @@ cleanup() {
   kill "${pids[@]}" 2>/dev/null
   hyprctl output remove "$OUTPUT" >/dev/null 2>&1
   if alive "$hypr_pid"; then
+    [[ -n $cursor_theme ]] && "$LIBDIR/omarchy-xrdp-cursor" restore "${saved_gsettings_sync:-true}"
     # As on Windows: the desktop is back on the machine's screens, locked
     hyprctl eval "hl.config({ misc = { key_press_enables_dpms = ${saved_key_dpms:-true}, mouse_move_enables_dpms = ${saved_mouse_dpms:-true} } })" >/dev/null
     hyprctl dispatch 'hl.dsp.dpms({ action = "on" })' >/dev/null
@@ -144,9 +147,12 @@ hyprctl dispatch "hl.dsp.workspace.move({ monitor = \"$OUTPUT\" })" >/dev/null
 
 backend_args=(--socket "$socket" --output "$OUTPUT" --resize-cmd "$LIBDIR/omarchy-xrdp-resize")
 [[ -n $BACKEND_DEBUG ]] && backend_args=(-v "${backend_args[@]}")
+# The RDP client draws the cursor (no lag); Hyprland's own becomes invisible
+read -r cursor_theme cursor_size < <("$LIBDIR/omarchy-xrdp-cursor" hide)
 start_backend() {
   rm -f "$socket"
   WAYLAND_DISPLAY=$hypr_wayland OMARCHY_XRDP_KEYBOARD=$KEYBOARD \
+    OMARCHY_XRDP_CURSOR_THEME=$cursor_theme OMARCHY_XRDP_CURSOR_SIZE=$cursor_size \
     "$LIBDIR/omarchy-xrdp-backend" "${backend_args[@]}" &
   backend_pid=$!
   pids+=("$backend_pid")

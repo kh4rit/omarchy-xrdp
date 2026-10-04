@@ -19,7 +19,7 @@ if ! omarchy pkg present xrdp; then
 fi
 
 echo "==> Installing dependencies"
-omarchy pkg add meson ninja wayland-protocols wlroots0.20 libxkbcommon libxcb xorg-xwayland xorg-xauth jq
+omarchy pkg add meson ninja wayland-protocols wlroots0.20 libxkbcommon libxcb libxcursor xorg-xwayland xorg-xauth jq
 
 echo "==> Building and installing omarchy-xrdp"
 makepkg -sif --noconfirm

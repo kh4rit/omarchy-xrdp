@@ -14,6 +14,11 @@ as_user() { sudo -n -u "$user" "$@"; }
 target() { as_user "$stage/tests/console-target.sh" "$@"; }
 monitors() { target hyprctl -j monitors; }
 rdp_size() { monitors | jq -r '.[] | select(.name == "HEADLESS-RDP") | "\(.width)x\(.height)"'; }
+# This run's part of the session log
+session_log() {
+  as_user cat "/home/$user/.local/state/omarchy-xrdp/session-20.log" | awk '/^----/ { n = 0 } { l[n++] = $0 } END { for (i = 0; i < n; i++) print l[i] }'
+}
+gtk_theme=$(as_user dconf read /org/gnome/desktop/interface/cursor-theme)
 session_live() { as_user test -e "/run/user/$uid/omarchy-xrdp/20/pid" && echo yes || echo no; }
 
 failures=0
@@ -41,9 +46,10 @@ check "workspace on the RDP monitor" "true" \
   "$(monitors | jq -r '.[] | select(.name == "HEADLESS-RDP") | .activeWorkspace.id > 0')"
 as_user chmod 666 "$stage/xup-20.sock"
 
-RDP_CLIENT=xfreerdp3 "$client" start "127.0.0.1:${PORT:-13390}" 1280x720 /dynamic-resolution >/dev/null
+client_size=${CLIENT_SIZE:-1280x720}
+RDP_CLIENT=xfreerdp3 "$client" start "127.0.0.1:${PORT:-13390}" "$client_size" /dynamic-resolution >/dev/null
 sleep 9
-check "resizes to the client" "1280x720" "$(rdp_size)"
+check "resizes to the client" "$client_size" "$(rdp_size)"
 # The first input only focuses the client window
 "$client" xtype mousemove 300 300
 sleep 2
@@ -53,9 +59,24 @@ sleep 3
 check "remote keys reach the desktop" "yes" "$(as_user test -e "$target_dir/remote-key" && echo yes)"
 check "remote input isn't local input" "yes" "$(session_live)"
 
+# The client draws the cursor; the backend follows its shape (needs
+# BACKEND_DEBUG=1 in the test user's xrdp.conf for the log lines)
+check "hidden cursor theme in use" "yes" \
+  "$(session_log | grep -q 'cursor shape default' && echo yes)"
+target hyprctl dispatch 'hl.dsp.exec_cmd("foot")' >/dev/null
+sleep 2
+"$client" xtype mousemove 640 360
+sleep 0.5
+"$client" xtype mousemove 660 380
+sleep 2
+check "text cursor over a terminal" "yes" "$(session_log | grep -q 'cursor shape text' && echo yes)"
+check "cursor image at the session scale" "${CURSOR_PX:-24}x${CURSOR_PX:-24}" \
+  "$(session_log | sed -n 's/.*cursor shape text (\(.*\))/\1/p' | tail -1)"
+check "GTK cursor theme untouched" "$gtk_theme" "$(as_user dconf read /org/gnome/desktop/interface/cursor-theme)"
+
 target hyprctl reload >/dev/null
 sleep 3
-check "size kept across a config reload" "1280x720" "$(rdp_size)"
+check "size kept across a config reload" "$client_size" "$(rdp_size)"
 check "input still doesn't wake the local monitor" "0" \
   "$(target hyprctl -j getoption misc:key_press_enables_dpms | jq -r 'if .bool == true or .int == 1 then 1 else 0 end')"
 check "reload isn't local input" "yes" "$(session_live)"

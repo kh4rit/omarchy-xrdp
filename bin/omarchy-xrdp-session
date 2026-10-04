@@ -246,9 +246,12 @@ systemctl --user start --no-block omarchy-xrdp-session.target
 backend_args=(--socket "$socket" --resize-cmd "$LIBDIR/omarchy-xrdp-resize")
 [[ -n $BACKEND_DEBUG ]] && backend_args=(-v "${backend_args[@]}")
 
+# The RDP client draws the cursor (no lag); Hyprland's own becomes invisible
+read -r cursor_theme cursor_size < <("$LIBDIR/omarchy-xrdp-cursor" hide)
 start_backend() {
   rm -f "$socket"
   WAYLAND_DISPLAY=$hypr_wayland OMARCHY_XRDP_KEYBOARD=$KEYBOARD \
+    OMARCHY_XRDP_CURSOR_THEME=$cursor_theme OMARCHY_XRDP_CURSOR_SIZE=$cursor_size \
     "$LIBDIR/omarchy-xrdp-backend" "${backend_args[@]}" &
   backend_pid=$!
   pids+=("$backend_pid")

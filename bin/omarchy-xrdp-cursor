@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# Switch the Hyprland of an RDP session (HYPRLAND_INSTANCE_SIGNATURE) to the
+# invisible omarchy-xrdp-hidden cursor theme, and back.
+#
+#   omarchy-xrdp-cursor hide      prints "THEME SIZE" when it is in use
+#   omarchy-xrdp-cursor restore [true|false]
+#                                 back to the user's theme, and GSettings
+#                                 syncing as it was
+#   omarchy-xrdp-cursor sync-off  after a config reload
+#
+# Hyprland draws its cursor into the RDP video, where it trails the hand by
+# an encode and network round trip. With the hidden theme it draws nothing,
+# and the backend has the RDP client draw the real cursor locally (see
+# cursor-theme/generate.py for how it tells the shapes apart).
+#
+# Hyprland normally copies a theme it loads into GTK's settings, which
+# persist; that is turned off first so the user's settings never change.
+
+set -uo pipefail
+
+THEME=omarchy-xrdp-hidden
+
+size=$(systemctl --user show-environment 2>/dev/null | sed -n 's/^XCURSOR_SIZE=//p')
+[[ $size =~ ^[0-9]+$ ]] || size=24
+
+theme_installed() {
+  local dir
+  # Also next to a staged copy of these scripts (tests)
+  [[ -f $(dirname "$0")/../icons/$THEME/cursors/default ]] && return 0
+  IFS=: read -ra dirs <<<"${XCURSOR_PATH:-$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons}"
+  for dir in "${dirs[@]}"; do
+    [[ -f $dir/$THEME/cursors/default ]] && return 0
+  done
+  return 1
+}
+
+no_gsettings_sync() {
+  hyprctl eval 'hl.config({ cursor = { sync_gsettings_theme = false } })' >/dev/null
+}
+
+case ${1:-} in
+  hide)
+    theme_installed || exit 1
+    no_gsettings_sync
+    [[ $(hyprctl setcursor "$THEME" "$size") == ok ]] || exit 1
+    echo "$THEME $size"
+    ;;
+  restore)
+    no_gsettings_sync
+    # No theme name: XCURSOR_THEME or Hyprland's default, as at its start
+    hyprctl setcursor "$size" >/dev/null
+    # Back as it was (normally on); turning it on doesn't write GSettings
+    hyprctl eval "hl.config({ cursor = { sync_gsettings_theme = ${2:-true} } })" >/dev/null
+    ;;
+  sync-off)
+    # After a config reload, which turns GSettings syncing back on
+    no_gsettings_sync
+    ;;
+  *)
+    echo "Usage: omarchy-xrdp-cursor hide|restore|sync-off" >&2
+    exit 1
+    ;;
+esac

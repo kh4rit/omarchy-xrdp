@@ -34,7 +34,15 @@ RDP client ◄── H.264/RFX ── xrdp (xup module) ◄── shared memory 
   directly, converting only what changed to NV12 (H.264) or RemoteFX tiles;
 - keeps one frame in flight and captures the next once xrdp has encoded it,
   so an idle desktop costs nothing and a busy one runs at the client's pace;
-- sends the cursor as a pointer shape, so the client draws it locally;
+- has the client draw the cursor locally, so it moves without lag (as with
+  a Windows host). Hyprland 0.56 can't hand out its cursor images and draws
+  the cursor into the video on a virtual monitor, so the session switches
+  Hyprland to `omarchy-xrdp-hidden`, an invisible cursor theme whose shapes
+  differ only in their hotspots. The backend reads the hotspot, works out
+  the shape and sends the client the real image from the user's cursor
+  theme at the session's scale. (Hyprland's copying of cursor themes into
+  GTK settings is switched off first, so those never change.) Cursors an
+  app draws itself, which are rare, stay in the video;
 - injects keyboard (RDP scancodes, with the client's keyboard layout) and
   mouse (including smooth scrolling) through virtual input devices;
 - follows client resizes (dynamic resolution) by resizing the Hyprland output;

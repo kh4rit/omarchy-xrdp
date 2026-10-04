@@ -63,6 +63,8 @@ struct wl_ctx {
     /* cursor (cursor.c) */
     bool paint_cursor;  /* cursor drawn into the frames */
     bool client_cursor; /* cursor image sent for the client to draw */
+    bool theme_cursor;  /* shapes decoded from the omarchy-xrdp-hidden theme */
+    int theme_hot_x, theme_hot_y, theme_size, theme_shape;
     struct wl_pointer *pointer;
     struct ext_image_copy_capture_cursor_session_v1 *cursor_session;
     struct capture cursor_capture;
@@ -92,3 +94,4 @@ extern const struct wl_seat_listener seat_listener;
 bool input_init(struct wl_ctx *ctx);
 bool cursor_init(struct wl_ctx *ctx);
 void start_cursor_frame(struct wl_ctx *ctx);
+void theme_cursor_update(struct wl_ctx *ctx);

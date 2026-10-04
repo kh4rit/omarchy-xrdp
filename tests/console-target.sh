@@ -22,6 +22,7 @@ EOC
     systemd-run --user --quiet --collect --unit=omxrdp-console-target \
       --setenv=WLR_BACKENDS=headless --setenv=WLR_HEADLESS_OUTPUTS=1 \
       --setenv=WLR_LIBINPUT_NO_DEVICES=1 --setenv=WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 \
+      --setenv=XCURSOR_PATH="$stage/icons:/usr/share/icons" \
       "$stage/lib/cage" -- sh -c 'exec Hyprland --config "$1/hyprland.lua"' sh "$dir"
     for _ in $(seq 100); do
       for lock in "$XDG_RUNTIME_DIR"/hypr/*/hyprland.lock; do

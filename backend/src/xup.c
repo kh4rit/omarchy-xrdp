@@ -659,7 +659,7 @@ static void send_hidden_cursor(struct server *s)
 
 static void send_cursor(struct server *s)
 {
-    if (!wl_client_cursor(s->wl)) {
+    if (!wl_client_cursor(s->wl) || (s->cursor && s->cursor->hidden)) {
         s->cursor_dirty = false;
         send_hidden_cursor(s);
         return;
@@ -672,6 +672,42 @@ static void send_cursor(struct server *s)
     bool large = c->width > CURSOR_SMALL || c->height > CURSOR_SMALL;
     bool large_ok = s->ci.large_pointer_support_flags & 1;
     int size = large && large_ok ? CURSOR_LARGE : CURSOR_SMALL;
+
+    /* Too big for the slot (HiDPI cursors on a client without large
+     * pointers): scale it down rather than cropping it */
+    struct cursor scaled = *c;
+    uint32_t *scaled_pixels = NULL;
+    if (c->width > size || c->height > size) {
+        double f = (double)size / (c->width > c->height ? c->width : c->height);
+        scaled.width = c->width * f;
+        scaled.height = c->height * f;
+        scaled.hot_x = c->hot_x * f;
+        scaled.hot_y = c->hot_y * f;
+        scaled_pixels = malloc((size_t)scaled.width * scaled.height * 4);
+        if (!scaled_pixels)
+            return;
+        /* Box filter over premultiplied ARGB */
+        for (int y = 0; y < scaled.height; y++) {
+            for (int x = 0; x < scaled.width; x++) {
+                int x0 = x / f, x1 = (x + 1) / f, y0 = y / f, y1 = (y + 1) / f;
+                if (x1 <= x0) x1 = x0 + 1;
+                if (y1 <= y0) y1 = y0 + 1;
+                uint32_t sum[4] = {0}, n = 0;
+                for (int sy = y0; sy < y1 && sy < c->height; sy++)
+                    for (int sx = x0; sx < x1 && sx < c->width; sx++, n++) {
+                        uint32_t p = c->pixels[(size_t)sy * c->width + sx];
+                        for (int k = 0; k < 4; k++)
+                            sum[k] += (p >> (8 * k)) & 0xff;
+                    }
+                uint32_t out = 0;
+                for (int k = 0; n && k < 4; k++)
+                    out |= (sum[k] / n) << (8 * k);
+                scaled_pixels[(size_t)y * scaled.width + x] = out;
+            }
+        }
+        scaled.pixels = scaled_pixels;
+        c = &scaled;
+    }
     bool argb = s->ci.pointer_flags & 1;
     int Bpp = argb ? 4 : 3;
     size_t data_bytes = (size_t)size * size * Bpp, mask_bytes = (size_t)size * size / 8;
@@ -734,6 +770,7 @@ static void send_cursor(struct server *s)
     }
     free(m);
     free(data);
+    free(scaled_pixels);
 }
 
 /* ---- Wayland callbacks ------------------------------------------------------- */
@@ -766,6 +803,8 @@ static void on_resized(void *data, int w, int h)
 {
     struct server *s = data;
     s->want_full = true;
+    /* A new size can come with a new scale: cursor images follow it */
+    theme_cursor_reload(s->wl);
     log_info("output is %dx%d, session %dx%d", w, h, s->width, s->height);
 }
 
@@ -942,6 +981,20 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
     case EV_KEYUP:
         log_debug("key %s scancode 0x%02x flags 0x%04x keysym 0x%x", msg == EV_KEYDOWN ? "down" : "up",
                   p3 & 0x7f, p4, p2);
+        {
+            /* What the client sends for each modifier (Ctrl, Shift, Alt, Win)
+             * is the usual question with Mac clients; log each one's first
+             * press. Only modifiers, never what is typed. */
+            static bool seen[2][128];
+            int sc = p3 & 0x7f, ext = !!(p4 & KBD_FLAG_EXT);
+            bool modifier = sc == 0x1d || sc == 0x2a || sc == 0x36 || sc == 0x38 || sc == 0x5b ||
+                            sc == 0x5c;
+            if (modifier && msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP) && !seen[ext][sc]) {
+                seen[ext][sc] = true;
+                log_info("modifier key: scancode 0x%02x%s (flags 0x%04x, keysym 0x%x)", sc,
+                         ext ? " extended" : "", p4, p2);
+            }
+        }
         key_event(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
         return;
     case EV_KEYSYNC:

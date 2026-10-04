@@ -9,6 +9,8 @@ wayland_client = dependency('wayland-client')
 xkbcommon = dependency('xkbcommon')
 xcb = dependency('xcb')
 xcb_xfixes = dependency('xcb-xfixes')
+xcursor = dependency('xcursor')
+math = meson.get_compiler('c').find_library('m')
 wayland_protocols = dependency('wayland-protocols')
 wayland_scanner = find_program('wayland-scanner')
 
@@ -38,4 +40,4 @@ executable('omarchy-xrdp-backend',
   'src/main.c', 'src/wayland.c', 'src/cursor.c', 'src/input.c', 'src/xup.c', 'src/keymap.c',
   'src/color.c', 'src/clipboard.c',
   protocol_sources,
-  dependencies: [wayland_client, xkbcommon, xcb, xcb_xfixes])
+  dependencies: [wayland_client, xkbcommon, xcb, xcb_xfixes, xcursor, math])

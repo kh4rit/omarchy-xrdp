@@ -42,6 +42,9 @@ output=${OMARCHY_XRDP_OUTPUT:-HEADLESS-RDP}
 rule="hl.monitor({ output = \"$output\", mode = \"${width}x${height}@60\", position = \"$position\", scale = $scale })"
 
 if ((print_only)); then
+  # A session's initial rule: record its scale for the backend
+  initial_state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-xrdp/${OMARCHY_XRDP_DISPLAY:-}"
+  [[ -n ${OMARCHY_XRDP_DISPLAY:-} && -d $initial_state ]] && echo "$scale" >"$initial_state/scale"
   echo "$rule"
   exit 0
 fi
@@ -51,6 +54,8 @@ state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-xrdp/${OMARCHY_XRDP_DISPLA
 if [[ -f $state/hyprland.lua ]]; then
   sed -i "s|^hl\.monitor({ output = \"HEADLESS-RDP\".*|$rule|" "$state/hyprland.lua"
 fi
+# For the backend, which sizes the client-drawn cursor by it
+echo "$scale" >"$state/scale"
 hyprctl eval "$rule" >/dev/null
 
 # Console mode (a live local desktop): keep the machine's own monitors dark
@@ -61,4 +66,11 @@ if [[ -n ${OMARCHY_XRDP_CONSOLE:-} ]]; then
   for monitor in $(hyprctl -j monitors | jq -r --arg o "$output" '.[] | select(.name != $o) | .name'); do
     hyprctl dispatch "hl.dsp.dpms({ action = \"off\", monitor = \"$monitor\" })" >/dev/null
   done
+fi
+
+# A config reload turns GSettings syncing back on, which would copy the
+# invisible cursor theme into the user's GTK settings at the next cursor
+# reload (e.g. a scale change)
+if [[ -n ${OMARCHY_XRDP_CURSOR_THEME:-} ]]; then
+  "$(dirname "$(readlink -f "$0")")/omarchy-xrdp-cursor" sync-off
 fi

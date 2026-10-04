@@ -392,6 +392,15 @@ struct wl_ctx *wl_start(const char *output_name, const struct wl_callbacks *cb, 
      * permission isn't granted). OMARCHY_XRDP_CURSOR=client tries anyway. */
     const char *mode = getenv("OMARCHY_XRDP_CURSOR");
     ctx->client_cursor = mode && !strcmp(mode, "client");
+    /* The session switched Hyprland to the invisible hidden theme: the client
+     * draws real images, decoded from the hotspots (cursor.c) */
+    const char *theme = getenv("OMARCHY_XRDP_CURSOR_THEME");
+    if (theme && *theme && !(mode && !strcmp(mode, "frames"))) {
+        ctx->client_cursor = ctx->theme_cursor = true;
+        const char *size = getenv("OMARCHY_XRDP_CURSOR_SIZE");
+        ctx->theme_size = size && atoi(size) > 0 ? atoi(size) : 24;
+        ctx->theme_shape = -1;
+    }
     if (!ctx->client_cursor || !cursor_init(ctx)) {
         ctx->client_cursor = false;
         ctx->paint_cursor = true;

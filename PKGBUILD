@@ -1,15 +1,15 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
 arch=(x86_64)
 url="https://github.com/cage-kiosk/cage"
 license=(MIT)
-depends=(xrdp hyprland wlroots0.20 wayland libxkbcommon libxcb xorg-xwayland xorg-xauth jq procps-ng bash)
-makedepends=(meson ninja wayland-protocols)
+depends=(xrdp hyprland wlroots0.20 wayland libxkbcommon libxcb libxcursor xorg-xwayland xorg-xauth jq procps-ng bash)
+makedepends=(meson ninja wayland-protocols python)
 optdepends=('pipewire-module-xrdp: sound in RDP sessions')
 options=(!debug)
 source=("cage-$_cagever.tar.gz::https://github.com/cage-kiosk/cage/archive/refs/tags/v$_cagever.tar.gz")
@@ -25,6 +25,7 @@ build() {
   # xrdp's headers (xrdp_client_info.h) come with the xrdp package
   meson setup --prefix=/usr --buildtype=plain build-backend "$startdir/backend"
   meson compile -C build-backend
+  python "$startdir/cursor-theme/generate.py" hidden-cursors
 }
 
 package() {
@@ -35,10 +36,12 @@ package() {
   install -Dm755 build-backend/omarchy-xrdp-backend "$lib/omarchy-xrdp-backend"
 
   for script in omarchy-xrdp-xserver omarchy-xrdp-session omarchy-xrdp-compositor \
-    omarchy-xrdp-startwm omarchy-xrdp-wm omarchy-xrdp-resize omarchy-xrdp-console; do
+    omarchy-xrdp-startwm omarchy-xrdp-wm omarchy-xrdp-resize omarchy-xrdp-console omarchy-xrdp-cursor; do
     install -Dm755 "$startdir/bin/$script" "$lib/$script"
   done
   install -Dm755 "$startdir/shims/uwsm" "$lib/shims/uwsm"
+  install -d "$pkgdir/usr/share/icons"
+  cp -r hidden-cursors "$pkgdir/usr/share/icons/omarchy-xrdp-hidden"
   install -Dm644 "$startdir/systemd/omarchy-xrdp-session.target" \
     "$pkgdir/usr/lib/systemd/user/omarchy-xrdp-session.target"
   install -Dm755 "$startdir/bin/omarchy-xrdp" "$pkgdir/usr/bin/omarchy-xrdp"

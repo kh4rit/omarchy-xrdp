@@ -35,6 +35,7 @@ struct cursor {
     int hot_x, hot_y;
     int width, height;
     uint32_t *pixels;    /* ARGB8888, width*height, or NULL */
+    bool hidden;         /* drawn into the frames instead (app cursors) */
     bool shape_changed;
     bool position_changed;
 };
@@ -62,6 +63,8 @@ void wl_request_frame(struct wl_ctx *ctx, bool full);
 void wl_get_size(struct wl_ctx *ctx, int *width, int *height);
 /* Whether the client should draw the cursor (else it is in the frames) */
 bool wl_client_cursor(struct wl_ctx *ctx);
+/* Reload the client's cursor image (the output's scale changed) */
+void theme_cursor_reload(struct wl_ctx *ctx);
 
 /* Input injection (input.c), coordinates in output buffer pixels */
 void wl_key(struct wl_ctx *ctx, uint32_t evdev_code, bool pressed);
