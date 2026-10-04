@@ -1,0 +1,10 @@
+version = 1
+
+[[annotations]]
+path = [
+    "PKGBUILD",
+    ".SRCINFO",
+    "omarchy-xrdp.install",
+]
+SPDX-FileCopyrightText = "omarchy-xrdp AUR package contributors"
+SPDX-License-Identifier = "0BSD"

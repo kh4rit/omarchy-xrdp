@@ -1,28 +1,36 @@
 #!/bin/bash
-# Generate the AUR package (PKGBUILD + .SRCINFO) from this repo's PKGBUILD,
-# for the release tag v$pkgver that is already pushed to GitHub.
+# Generate the AUR package (PKGBUILD, .SRCINFO, install file and the
+# package-source license files the AUR submission guidelines ask for) from
+# this repo's PKGBUILD, for the release tag v$pkgver already on GitHub.
 #
 # Usage: packaging/make-aur.sh GITHUB_USER [OUTDIR [--dry-run]]   (default OUTDIR: packaging/aur)
 #
 # The repo's PKGBUILD builds from the checkout ($startdir); the AUR one
 # downloads the tagged source tarball instead. Then publish:
-#   git clone ssh://aur@aur.archlinux.org/omarchy-xrdp.git
-#   cp packaging/aur/{PKGBUILD,.SRCINFO} omarchy-xrdp/ && cd omarchy-xrdp
-#   git add PKGBUILD .SRCINFO && git commit -m "Update to $pkgver" && git push
+#   git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/omarchy-xrdp.git
+#   cp packaging/aur/{PKGBUILD,.SRCINFO,omarchy-xrdp.install,LICENSE,REUSE.toml} omarchy-xrdp/
+#   cd omarchy-xrdp && git add PKGBUILD .SRCINFO omarchy-xrdp.install LICENSE REUSE.toml
+#   git commit -m "omarchy-xrdp $pkgver" && git push
 set -euo pipefail
 
-owner=${1:?Usage: make-aur.sh GITHUB_USER [OUTDIR]}
+owner=${1:?Usage: make-aur.sh GITHUB_USER [OUTDIR [--dry-run]]}
 root=$(dirname "$(readlink -f "$0")")/..
 out=${2:-$root/packaging/aur}
 mkdir -p "$out"
 
+# Maintainer line, email disguised against spam ("name at domain dot tld")
+name=$(git -C "$root" log -1 --format='%an')
+email=$(git -C "$root" log -1 --format='%ae' | sed 's/@/ at /; s/\./ dot /g')
+
 src='$srcdir/$pkgname-$pkgver'
-sed -e "1s|.*|# Maintainer: $(git -C "$root" log -1 --format='%an <%ae>')|" \
+sed -e "1s|.*|# Maintainer: $name <$email>|" \
   -e "s|GITHUB_USER|$owner|g" \
   -e "s|\\\$startdir|$src|g" \
   -e 's|^source=(\(.*\))$|source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz"\n        \1)|' \
   -e "s|^sha256sums=('\(.*\)')$|sha256sums=('SKIP'\n            '\1')|" \
   "$root/PKGBUILD" >"$out/PKGBUILD"
+cp "$root/omarchy-xrdp.install" "$root/packaging/aur-files/LICENSE" \
+  "$root/packaging/aur-files/REUSE.toml" "$out/"
 
 cd "$out"
 if [[ ${3:-} == --dry-run ]]; then

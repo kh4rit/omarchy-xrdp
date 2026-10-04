@@ -1,0 +1,22 @@
+post_install() {
+  echo "To offer the Omarchy session over RDP, run:"
+  echo "  sudo omarchy-xrdp setup"
+  echo "  sudo systemctl daemon-reload"
+  echo "  sudo systemctl enable --now xrdp xrdp-sesman"
+  echo "RDP users need Omarchy's config in their home and, if sesman restricts"
+  echo "logins to a group (TerminalServerUsers), membership in it (e.g. tsusers)."
+  echo "See /usr/share/doc/omarchy-xrdp/README.md"
+}
+
+post_upgrade() {
+  echo "Apply the upgrade:"
+  echo "  sudo omarchy-xrdp setup"
+  echo "  sudo systemctl daemon-reload && sudo systemctl restart xrdp"
+  echo "Restarting xrdp disconnects RDP clients; their sessions keep running."
+  echo "Running sessions use the new version after logging out and back in."
+}
+
+post_remove() {
+  echo "If you didn't run 'sudo omarchy-xrdp remove' before removing the package,"
+  echo "restore /etc/xrdp/xrdp.ini and sesman.ini from their .omarchy-xrdp.bak copies."
+}
