@@ -6,7 +6,7 @@ pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
 arch=(x86_64)
-url="https://github.com/cage-kiosk/cage"
+url="https://github.com/GITHUB_USER/omarchy-xrdp"
 license=(MIT)
 depends=(xrdp hyprland wlroots0.20 wayland libxkbcommon libxcb libxcursor xorg-xwayland xorg-xauth jq procps-ng bash)
 makedepends=(meson ninja wayland-protocols python)
@@ -32,6 +32,7 @@ package() {
   local lib="$pkgdir/usr/lib/omarchy-xrdp"
 
   install -Dm755 build-cage/cage "$lib/cage"
+  install -Dm644 "$startdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "cage-$_cagever/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.cage"
   install -Dm755 build-backend/omarchy-xrdp-backend "$lib/omarchy-xrdp-backend"
 

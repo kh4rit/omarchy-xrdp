@@ -8,6 +8,12 @@ machine's own screens, with no shared input or display, and is encoded the
 way xrdp encodes its own Xorg sessions: H.264 (or RemoteFX) through the RDP
 graphics pipeline.
 
+> **Status: alpha.** Tested on one machine (Hyprland 0.56.2 with its Lua
+> config, xrdp 0.10.6, Intel graphics) with Windows App on macOS, Windows
+> Remote Desktop and FreeRDP. Bug reports with
+> `~/.local/state/omarchy-xrdp/session-*.log` attached are very welcome.
+> See [CHANGELOG.md](CHANGELOG.md).
+
 ## How it works
 
 xrdp's own Xorg sessions use a backend, xorgxrdp, that hands frames to xrdp
