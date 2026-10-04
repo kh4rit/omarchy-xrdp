@@ -1026,6 +1026,12 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
     case EV_LBUTTONUP:
     case EV_LBUTTONDOWN:
         wl_pointer_motion(s->wl, (int32_t)p1, (int32_t)p2);
+        {
+            /* With the shortcut log: how clients order Command and clicks */
+            static int clicks;
+            if (clicks++ < 100)
+                log_info("shortcut: left button %s", msg == EV_LBUTTONDOWN ? "down" : "up");
+        }
         wl_pointer_button(s->wl, BTN_LEFT, msg == EV_LBUTTONDOWN);
         return;
     case EV_RBUTTONUP:
