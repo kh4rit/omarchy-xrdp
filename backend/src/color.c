@@ -1,9 +1,7 @@
 /* Pixel conversions into the shared-memory layouts xrdp's encoders expect,
  * using the same integer formulas as xorgxrdp (rdpCapture.c) so colours
  * match an Xorg session. Sources are XRGB8888 (bytes B, G, R, X). */
-#include <pthread.h>
 #include <string.h>
-#include <unistd.h>
 
 #include "color.h"
 
@@ -97,82 +95,5 @@ void swizzle_rect(uint8_t *dst, int dst_stride, const uint8_t *src, int src_stri
             uint32_t p = s[x];
             d[x] = (p & 0xff00ff00u) | ((p >> 16) & 0xff) | ((p & 0xff) << 16);
         }
-    }
-}
-
-/* Big updates (a full 4K frame takes ~13 ms on one core) are cut into
- * even-height bands, converted by a few threads; small ones aren't worth it */
-#define NV12_PARALLEL_MIN (256 * 1024) /* pixels */
-#define NV12_MAX_THREADS 8
-#define NV12_MAX_JOBS 256
-
-struct nv12_job {
-    uint8_t *dst;
-    int w, h;
-    const uint8_t *src;
-    int src_stride, src_w, src_h;
-    struct rect *bands;
-    int n_bands, first, step;
-};
-
-static void *nv12_worker(void *arg)
-{
-    struct nv12_job *j = arg;
-    for (int i = j->first; i < j->n_bands; i += j->step)
-        nv12_convert_rect(j->dst, j->w, j->h, j->src, j->src_stride, j->src_w, j->src_h,
-                          j->bands[i]);
-    return NULL;
-}
-
-void nv12_convert_rects(uint8_t *dst, int w, int h, const uint8_t *src, int src_stride, int src_w,
-                        int src_h, const struct rect *rects, int n)
-{
-    long area = 0;
-    for (int i = 0; i < n; i++)
-        area += (long)rects[i].w * rects[i].h;
-    static int threads;
-    if (!threads) {
-        long cpus = sysconf(_SC_NPROCESSORS_ONLN);
-        threads = cpus >= 4 ? (int)(cpus / 2) : 1;
-        if (threads > NV12_MAX_THREADS)
-            threads = NV12_MAX_THREADS;
-    }
-    if (area < NV12_PARALLEL_MIN || threads < 2) {
-        for (int i = 0; i < n; i++)
-            nv12_convert_rect(dst, w, h, src, src_stride, src_w, src_h, rects[i]);
-        return;
-    }
-
-    /* Bands of about area / (4 * threads) pixels, rows kept even */
-    struct rect bands[NV12_MAX_JOBS];
-    int n_bands = 0;
-    long target = area / (4 * threads) + 1;
-    for (int i = 0; i < n; i++) {
-        struct rect r = rects[i];
-        int rows = r.w > 0 ? (int)(target / r.w) : r.h;
-        rows = rows < 2 ? 2 : rows & ~1;
-        for (int y = 0; y < r.h; y += rows) {
-            if (n_bands == NV12_MAX_JOBS) { /* no room left: the rest whole */
-                bands[n_bands - 1].h = r.y + r.h - bands[n_bands - 1].y;
-                break;
-            }
-            bands[n_bands++] = (struct rect){r.x, r.y + y, r.w, y + rows > r.h ? r.h - y : rows};
-        }
-    }
-
-    pthread_t tids[NV12_MAX_THREADS];
-    struct nv12_job jobs[NV12_MAX_THREADS];
-    int started = 0;
-    for (int t = 0; t < threads; t++) {
-        jobs[t] = (struct nv12_job){dst, w, h, src, src_stride, src_w, src_h, bands, n_bands, t, threads};
-        if (t > 0 && pthread_create(&tids[t], NULL, nv12_worker, &jobs[t]) == 0)
-            started |= 1 << t;
-    }
-    nv12_worker(&jobs[0]);
-    for (int t = 1; t < threads; t++) {
-        if (started & (1 << t))
-            pthread_join(tids[t], NULL);
-        else
-            nv12_worker(&jobs[t]); /* thread didn't start: do its share here */
     }
 }

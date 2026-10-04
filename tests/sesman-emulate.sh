@@ -29,7 +29,7 @@ xrdp_env=(
 # Test overrides (OMARCHY_XRDP_LIBDIR, _ATTACH, _OUTPUT, _LOCK, ...)
 while IFS= read -r var; do
   xrdp_env+=("$var=${!var}")
-done < <(compgen -e | grep -E '^(OMARCHY_XRDP_|XCURSOR_PATH$|XDG_CONFIG_HOME$)')
+done < <(compgen -e | grep -E '^(OMARCHY_XRDP_|XCURSOR_PATH$)')
 
 env -i "${xrdp_env[@]}" "$libdir/omarchy-xrdp-xserver" ":$display" \
   -auth .Xauthority -config xrdp/xorg.conf -noreset -nolisten tcp \

@@ -1,15 +1,5 @@
 # Changelog
 
-## 0.6.0
-
-- `FRAME_RATE` per user (e.g. 120 on a LAN): frames/s sent and the RDP
-  monitor's refresh rate.
-- Faster frame pipeline: the next frame is captured while xrdp encodes the
-  last one (1080p worst case: 30 → 46 frames/s at the default 60, ~70 at
-  120), and big updates are converted on several cores (4K: 13 → 2.6 ms).
-- `omarchy-xrdp setup` sets x264 to 4 threads per screen in gfx.toml
-  (restored by `remove`).
-
 ## 0.5.2 — first public release (alpha)
 
 Tested on one machine (Arch/Omarchy, Hyprland 0.56.2, xrdp 0.10.6, Intel

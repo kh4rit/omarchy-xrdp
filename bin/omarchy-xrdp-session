@@ -54,7 +54,6 @@ KEYBOARD=""
 RENDER_NODE=""
 BACKEND_DEBUG=""
 MAC_SHORTCUTS=""
-FRAME_RATE=""
 CONSOLE=yes
 config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
 [[ -r $config ]] && source "$config"
@@ -254,7 +253,7 @@ start_backend() {
   rm -f "$socket"
   WAYLAND_DISPLAY=$hypr_wayland OMARCHY_XRDP_KEYBOARD=$KEYBOARD \
     OMARCHY_XRDP_CURSOR_THEME=$cursor_theme OMARCHY_XRDP_CURSOR_SIZE=$cursor_size \
-    OMARCHY_XRDP_MAC_SHORTCUTS=$MAC_SHORTCUTS OMARCHY_XRDP_FRAME_RATE=$FRAME_RATE \
+    OMARCHY_XRDP_MAC_SHORTCUTS=$MAC_SHORTCUTS \
     "$LIBDIR/omarchy-xrdp-backend" "${backend_args[@]}" &
   backend_pid=$!
   pids+=("$backend_pid")

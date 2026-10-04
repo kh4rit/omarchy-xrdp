@@ -9,7 +9,7 @@ root=$(dirname "$(readlink -f "$0")")/..
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-for f in xrdp.ini sesman.ini gfx.toml; do
+for f in xrdp.ini sesman.ini; do
   cp "/etc/xrdp/$f" "$tmp/$f"
   if [[ -r /etc/xrdp/$f.omarchy-xrdp.bak ]]; then
     cp "/etc/xrdp/$f.omarchy-xrdp.bak" "$tmp/$f.pristine"
@@ -19,7 +19,7 @@ for f in xrdp.ini sesman.ini gfx.toml; do
 done
 
 run() {
-  OMARCHY_XRDP_NO_ROOT=1 XRDP_INI="$tmp/xrdp.ini" SESMAN_INI="$tmp/sesman.ini" GFX_TOML="$tmp/gfx.toml" \
+  OMARCHY_XRDP_NO_ROOT=1 XRDP_INI="$tmp/xrdp.ini" SESMAN_INI="$tmp/sesman.ini" \
     "$root/bin/omarchy-xrdp" "$@"
 }
 
@@ -28,16 +28,13 @@ echo "--- xrdp.ini changes from pristine"
 diff "$tmp/xrdp.ini.pristine" "$tmp/xrdp.ini" || true
 echo "--- sesman.ini changes from pristine"
 diff "$tmp/sesman.ini.pristine" "$tmp/sesman.ini" || true
-echo "--- gfx.toml changes from pristine"
-diff "$tmp/gfx.toml.pristine" "$tmp/gfx.toml" || true
 
 cp "$tmp/xrdp.ini" "$tmp/xrdp.ini.once"
 cp "$tmp/sesman.ini" "$tmp/sesman.ini.once"
-cp "$tmp/gfx.toml" "$tmp/gfx.toml.once"
 run setup
-cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.once" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.once" && cmp "$tmp/gfx.toml" "$tmp/gfx.toml.once"
+cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.once" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.once"
 echo "--- second setup changed nothing"
 
 run remove
-cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.pristine" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.pristine" && cmp "$tmp/gfx.toml" "$tmp/gfx.toml.pristine"
+cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.pristine" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.pristine"
 echo "--- remove restored the pristine files exactly"
