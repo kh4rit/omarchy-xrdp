@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
@@ -268,6 +269,39 @@ static const struct wl_output_listener output_listener = {
     .description = output_description,
 };
 
+/* Console mode: the compositor reports input activity after a second of
+ * idleness. Activity we didn't just inject ourselves came from the machine's
+ * own keyboard or mouse. */
+static double mono_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void idle_idled(void *data, struct ext_idle_notification_v1 *n)
+{
+    struct wl_ctx *ctx = data;
+    ctx->idle = true;
+}
+
+static void idle_resumed(void *data, struct ext_idle_notification_v1 *n)
+{
+    struct wl_ctx *ctx = data;
+    if (!ctx->idle)
+        return;
+    ctx->idle = false;
+    double since = mono_now() - ctx->last_inject;
+    log_debug("input activity, %.3f s after our last injected event", since);
+    if (since > 0.5 && ctx->cb->local_activity)
+        ctx->cb->local_activity(ctx->cb_data);
+}
+
+static const struct ext_idle_notification_v1_listener idle_listener = {
+    .idled = idle_idled,
+    .resumed = idle_resumed,
+};
+
 static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
                             const char *iface, uint32_t version)
 {
@@ -295,6 +329,8 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
     } else if (!strcmp(iface, zwlr_virtual_pointer_manager_v1_interface.name)) {
         ctx->vptr_manager = wl_registry_bind(reg, name, &zwlr_virtual_pointer_manager_v1_interface,
                                              version < 2 ? version : 2);
+    } else if (!strcmp(iface, ext_idle_notifier_v1_interface.name) && version >= 2) {
+        ctx->idle_notifier = wl_registry_bind(reg, name, &ext_idle_notifier_v1_interface, 2);
     }
 }
 
@@ -365,6 +401,15 @@ struct wl_ctx *wl_start(const char *output_name, const struct wl_callbacks *cb, 
         ctx->paint_cursor ? EXT_IMAGE_COPY_CAPTURE_MANAGER_V1_OPTIONS_PAINT_CURSORS : 0);
     ext_image_copy_capture_session_v1_add_listener(ctx->screen.session, &capture_session_listener,
                                                    &ctx->screen);
+
+    /* Input notifications ignore idle inhibitors (a playing video) */
+    if (cb->local_activity && ctx->idle_notifier) {
+        ctx->idle_notification = ext_idle_notifier_v1_get_input_idle_notification(
+            ctx->idle_notifier, 1000, ctx->seat);
+        ext_idle_notification_v1_add_listener(ctx->idle_notification, &idle_listener, ctx);
+    } else if (cb->local_activity) {
+        log_info("compositor lacks ext-idle-notify v2, can't notice local input");
+    }
     wl_display_roundtrip(ctx->display);
     return ctx;
 }

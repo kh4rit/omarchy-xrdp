@@ -46,6 +46,8 @@ struct wl_callbacks {
     void (*cursor_changed)(void *data, struct cursor *cursor);
     void (*output_resized)(void *data, int width, int height);
     void (*stopped)(void *data);
+    /* console mode: input arrived that we didn't inject (may be NULL) */
+    void (*local_activity)(void *data);
 };
 
 struct wl_ctx *wl_start(const char *output_name, const struct wl_callbacks *cb, void *data);

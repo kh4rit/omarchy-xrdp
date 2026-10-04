@@ -1,7 +1,7 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.2.1
+pkgver=0.3.0
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
@@ -35,7 +35,7 @@ package() {
   install -Dm755 build-backend/omarchy-xrdp-backend "$lib/omarchy-xrdp-backend"
 
   for script in omarchy-xrdp-xserver omarchy-xrdp-session omarchy-xrdp-compositor \
-    omarchy-xrdp-startwm omarchy-xrdp-wm omarchy-xrdp-resize; do
+    omarchy-xrdp-startwm omarchy-xrdp-wm omarchy-xrdp-resize omarchy-xrdp-console; do
     install -Dm755 "$startdir/bin/$script" "$lib/$script"
   done
   install -Dm755 "$startdir/shims/uwsm" "$lib/shims/uwsm"

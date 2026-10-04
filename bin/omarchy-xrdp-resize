@@ -34,7 +34,12 @@ if [[ $scale == auto ]]; then
   if ((width >= 3200)); then scale=2; elif ((width >= 2560)); then scale=1.5; else scale=1; fi
 fi
 
-rule="hl.monitor({ output = \"HEADLESS-RDP\", mode = \"${width}x${height}@60\", position = \"0x0\", scale = $scale })"
+# A live desktop already has monitors at 0x0: let Hyprland place it beside them
+position=0x0
+[[ -n ${OMARCHY_XRDP_CONSOLE:-} ]] && position=auto
+
+output=${OMARCHY_XRDP_OUTPUT:-HEADLESS-RDP}
+rule="hl.monitor({ output = \"$output\", mode = \"${width}x${height}@60\", position = \"$position\", scale = $scale })"
 
 if ((print_only)); then
   echo "$rule"
@@ -42,5 +47,18 @@ if ((print_only)); then
 fi
 
 state="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omarchy-xrdp/${OMARCHY_XRDP_DISPLAY:?not in an omarchy-xrdp session}"
-sed -i "s|^hl\.monitor({ output = \"HEADLESS-RDP\".*|$rule|" "$state/hyprland.lua"
+# A console session (live desktop) has no generated config to keep in step
+if [[ -f $state/hyprland.lua ]]; then
+  sed -i "s|^hl\.monitor({ output = \"HEADLESS-RDP\".*|$rule|" "$state/hyprland.lua"
+fi
 hyprctl eval "$rule" >/dev/null
+
+# Console mode (a live local desktop): keep the machine's own monitors dark
+# while the desktop is in use remotely, and don't let the remote user's
+# input wake them. Rerun after config reloads, which reset both.
+if [[ -n ${OMARCHY_XRDP_CONSOLE:-} ]]; then
+  hyprctl eval 'hl.config({ misc = { key_press_enables_dpms = false, mouse_move_enables_dpms = false } })' >/dev/null
+  for monitor in $(hyprctl -j monitors | jq -r --arg o "$output" '.[] | select(.name != $o) | .name'); do
+    hyprctl dispatch "hl.dsp.dpms({ action = \"off\", monitor = \"$monitor\" })" >/dev/null
+  done
+fi

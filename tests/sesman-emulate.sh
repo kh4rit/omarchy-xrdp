@@ -25,8 +25,11 @@ xrdp_env=(
   XRDP_PULSE_SINK_SOCKET="xrdp_chansrv_audio_out_socket_$display"
   XRDP_PULSE_SOURCE_SOCKET="xrdp_chansrv_audio_in_socket_$display"
 )
-[[ -n ${OMARCHY_XRDP_LIBDIR:-} ]] && xrdp_env+=(OMARCHY_XRDP_LIBDIR="$OMARCHY_XRDP_LIBDIR")
 [[ -n ${LD_LIBRARY_PATH:-} ]] && xrdp_env+=(LD_LIBRARY_PATH="$LD_LIBRARY_PATH")
+# Test overrides (OMARCHY_XRDP_LIBDIR, _ATTACH, _OUTPUT, _LOCK, ...)
+while IFS= read -r var; do
+  xrdp_env+=("$var=${!var}")
+done < <(compgen -e | grep '^OMARCHY_XRDP_')
 
 env -i "${xrdp_env[@]}" "$libdir/omarchy-xrdp-xserver" ":$display" \
   -auth .Xauthority -config xrdp/xorg.conf -noreset -nolisten tcp \

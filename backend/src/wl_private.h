@@ -3,6 +3,7 @@
 #include <wayland-client.h>
 
 #include "ext-data-control-v1-client-protocol.h"
+#include "ext-idle-notify-v1-client-protocol.h"
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
 #include "virtual-keyboard-unstable-v1-client-protocol.h"
@@ -73,6 +74,13 @@ struct wl_ctx {
     struct zwp_virtual_keyboard_v1 *keyboard;
     struct zwlr_virtual_pointer_v1 *vpointer;
     uint32_t mods_depressed, mods_latched, mods_locked, group;
+    double last_inject; /* when we last injected input (monotonic s) */
+
+    /* console mode: notice input that isn't ours (the machine's own keyboard
+     * or mouse) through idle notifications */
+    struct ext_idle_notifier_v1 *idle_notifier;
+    struct ext_idle_notification_v1 *idle_notification;
+    bool idle;
     struct xkb_context *xkb;
     struct xkb_keymap *keymap;
     struct xkb_state *xkb_state;

@@ -53,8 +53,36 @@ height=${geometry#*x}
 KEYBOARD=""
 RENDER_NODE=""
 BACKEND_DEBUG=""
+CONSOLE=yes
 config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
 [[ -r $config ]] && source "$config"
+
+# A Hyprland of this user that no omarchy-xrdp session started: their live
+# local desktop (logged in at the machine's screens)
+local_desktop() {
+  local runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)} lock dir sig pid
+  for lock in "$runtime"/hypr/*/hyprland.lock; do
+    dir=$(dirname "$lock")
+    sig=$(basename "$dir")
+    pid=$(sed -n 1p "$lock" 2>/dev/null)
+    [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null || continue
+    grep -qxF "$sig" "$runtime"/omarchy-xrdp/*/hyprland-instance 2>/dev/null && continue
+    echo "$sig"
+    return 0
+  done
+  return 1
+}
+
+# Attach to the live desktop instead of starting a second session of the
+# same user, which would fight it over the systemd --user session
+attach=${OMARCHY_XRDP_ATTACH:-}
+if [[ -z $attach && $CONSOLE == yes ]]; then
+  attach=$(local_desktop)
+fi
+if [[ -n $attach ]]; then
+  exec "$LIBDIR/omarchy-xrdp-console" "$attach" ":$display" -geometry "$geometry" \
+    -socket "$socket" ${auth:+-auth "$auth"}
+fi
 
 if [[ -z $RENDER_NODE ]]; then
   for node in /dev/dri/renderD*; do

@@ -11,6 +11,7 @@ here=$(dirname "$(readlink -f "$0")")
 # A second session of the same user would take over its systemd --user
 # environment (one session per user), so never test next to a real one
 for dir in "$XDG_RUNTIME_DIR"/omarchy-xrdp/*/; do
+  [[ -n ${OMARCHY_XRDP_ATTACH:-} ]] && break  # console tests attach on purpose
   d=$(basename "$dir")
   [[ $d == "$display" || ! -f $dir/pid ]] && continue
   if kill -0 "$(<"$dir/pid")" 2>/dev/null; then
@@ -21,8 +22,8 @@ done
 systemctl --user stop "omxrdp-test-$display" 2>/dev/null || true
 systemd-run --user --quiet --collect --unit="omxrdp-test-$display" \
   --working-directory="$HOME" \
-  ${OMARCHY_XRDP_LIBDIR:+--setenv=OMARCHY_XRDP_LIBDIR=$OMARCHY_XRDP_LIBDIR} \
   ${LD_LIBRARY_PATH:+--setenv=LD_LIBRARY_PATH=$LD_LIBRARY_PATH} \
+  $(compgen -e | grep '^OMARCHY_XRDP_' | sed 's/^/--setenv=/') \
   "$here/sesman-emulate.sh" "$display" "${SOCKET_DIR:-/tmp/omxrdp-test}/xup-$display.sock" "$geometry"
 for _ in $(seq 100); do
   [[ -f $XDG_RUNTIME_DIR/omarchy-xrdp/$display/pid ]] && echo "session :$display ready" && exit 0

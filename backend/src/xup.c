@@ -108,6 +108,7 @@ struct server {
     uint8_t key_down[KEY_MAX + 1];
     bool pause_ext1;
     bool stop;
+    bool local_activity; /* console mode: the machine was used locally */
 
     long frames_sent;
     double stats_start;
@@ -775,13 +776,24 @@ static void on_stopped(void *data)
     s->stop = true;
 }
 
+/* Console mode: someone used the machine's own keyboard or mouse. Like a
+ * login at a Windows console, that takes the desktop back (exit status 3
+ * tells omarchy-xrdp-console). */
+static void on_local_activity(void *data)
+{
+    struct server *s = data;
+    log_info("input from the machine's own keyboard or mouse");
+    s->local_activity = true;
+    s->stop = true;
+}
+
 /* ---- resize ------------------------------------------------------------------ */
 
-static void run_resize(struct server *s, int w, int h)
+static void run_resize(struct server *s, int w, int h, bool force)
 {
     int cw, ch;
     wl_get_size(s->wl, &cw, &ch);
-    if (!s->resize_cmd || (cw == w && ch == h))
+    if (!s->resize_cmd || (!force && cw == w && ch == h))
         return;
     char ws[16], hs[16];
     snprintf(ws, sizeof(ws), "%d", w);
@@ -794,13 +806,60 @@ static void run_resize(struct server *s, int w, int h)
     log_info("resizing output to %dx%d", w, h);
 }
 
+/* Hyprland's event socket: a config reload drops the runtime monitor rule
+ * (in console mode it was never in any config), so apply it again */
+static int hypr_events_connect(void)
+{
+    const char *runtime = getenv("XDG_RUNTIME_DIR"), *sig = getenv("HYPRLAND_INSTANCE_SIGNATURE");
+    if (!runtime || !sig)
+        return -1;
+    struct sockaddr_un addr = {.sun_family = AF_UNIX};
+    snprintf(addr.sun_path, sizeof(addr.sun_path), "%s/hypr/%s/.socket2.sock", runtime, sig);
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    if (fd >= 0 && connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        close(fd);
+        fd = -1;
+    }
+    return fd;
+}
+
+static void hypr_events_read(struct server *s, int *fd)
+{
+    static char line[4096];
+    static size_t len;
+    char buf[4096];
+    for (;;) {
+        ssize_t n = read(*fd, buf, sizeof(buf));
+        if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
+            close(*fd);
+            *fd = -1;
+            return;
+        }
+        if (n < 0)
+            return;
+        for (ssize_t i = 0; i < n; i++) {
+            if (buf[i] != '\n') {
+                if (len < sizeof(line) - 1)
+                    line[len++] = buf[i];
+                continue;
+            }
+            line[len] = 0;
+            len = 0;
+            if (!strncmp(line, "configreloaded>>", 16) && s->width > 0) {
+                log_info("Hyprland reloaded its config, reapplying the RDP monitor");
+                run_resize(s, s->width, s->height, true);
+            }
+        }
+    }
+}
+
 static void set_session_size(struct server *s, int w, int h)
 {
     s->width = w;
     s->height = h;
     if (!alloc_shm(s))
         log_info("cannot allocate the %dx%d frame buffer", w, h);
-    run_resize(s, w, h);
+    run_resize(s, w, h, false);
     s->want_full = true;
 }
 
@@ -1138,18 +1197,21 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
     struct sigaction sa = {.sa_handler = SIG_IGN, .sa_flags = SA_NOCLDWAIT};
     sigaction(SIGCHLD, &sa, NULL);
 
-    static const struct wl_callbacks cb = {
+    static struct wl_callbacks cb = {
         .frame_ready = on_frame,
         .cursor_changed = on_cursor,
         .output_resized = on_resized,
         .stopped = on_stopped,
     };
+    if (getenv("OMARCHY_XRDP_CONSOLE"))
+        cb.local_activity = on_local_activity;
     s.wl = wl_start(output, &cb, &s);
     if (!s.wl)
         return 1;
     /* xrdp's chansrv serves the RDP clipboard on the session's X display */
     const char *display = getenv("OMARCHY_XRDP_DISPLAY");
     struct clip *clip = display ? clip_start(s.wl, atoi(display)) : NULL;
+    int events_fd = hypr_events_connect();
     s.listen_fd = listen_on(socket_path);
     if (s.listen_fd < 0)
         return 1;
@@ -1186,14 +1248,15 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
 
         if (wl_prepare(s.wl) < 0)
             break;
-        struct pollfd fds[5] = {
+        struct pollfd fds[6] = {
             {.fd = wl_fd(s.wl), .events = POLLIN},
             {.fd = s.listen_fd, .events = POLLIN},
             {.fd = s.conn_fd, .events = POLLIN},
             {.fd = x_fd, .events = POLLIN},
             {.fd = clip ? clip_read_fd(clip) : -1, .events = POLLIN},
+            {.fd = events_fd, .events = POLLIN},
         };
-        int r = poll(fds, 5, timeout);
+        int r = poll(fds, 6, timeout);
         if (r < 0 && errno != EINTR) {
             wl_after_poll(s.wl, false);
             break;
@@ -1213,8 +1276,10 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
             if (r > 0 && fds[4].fd >= 0 && (fds[4].revents & (POLLIN | POLLHUP | POLLERR)))
                 clip_dispatch_read(clip);
         }
+        if (r > 0 && events_fd >= 0 && (fds[5].revents & (POLLIN | POLLHUP | POLLERR)))
+            hypr_events_read(&s, &events_fd);
     }
     drop_connection(&s, "shutting down");
     unlink(socket_path);
-    return 0;
+    return s.local_activity ? 3 : 0;
 }

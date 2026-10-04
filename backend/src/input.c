@@ -10,6 +10,13 @@
 
 #include "wl_private.h"
 
+static double now_s(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
 static uint32_t now_ms(void)
 {
     struct timespec ts;
@@ -42,6 +49,8 @@ void wl_set_keyboard_layout(struct wl_ctx *ctx, const char *layout, const char *
         .variant = variant,
         .options = NULL,
     };
+    /* A new keymap and modifier reset count as input activity too */
+    ctx->last_inject = now_s();
     struct xkb_keymap *keymap = xkb_keymap_new_from_names(ctx->xkb, &names, XKB_KEYMAP_COMPILE_NO_FLAGS);
     if (!keymap) {
         log_info("cannot compile xkb keymap for layout %s(%s), keeping the current one", layout,
@@ -65,6 +74,7 @@ void wl_set_keyboard_layout(struct wl_ctx *ctx, const char *layout, const char *
 
 void wl_key(struct wl_ctx *ctx, uint32_t evdev_code, bool pressed)
 {
+    ctx->last_inject = now_s();
     if (!ctx->xkb_state)
         return;
     zwp_virtual_keyboard_v1_key(ctx->keyboard, now_ms(), evdev_code,
@@ -99,6 +109,7 @@ void wl_get_locks(struct wl_ctx *ctx, bool *caps, bool *num)
 
 void wl_pointer_motion(struct wl_ctx *ctx, int x, int y)
 {
+    ctx->last_inject = now_s();
     int w = ctx->screen.buffer.frame.width, h = ctx->screen.buffer.frame.height;
     if (w <= 0 || h <= 0)
         return;
@@ -116,6 +127,7 @@ void wl_pointer_motion(struct wl_ctx *ctx, int x, int y)
 
 void wl_pointer_button(struct wl_ctx *ctx, uint32_t linux_button, bool pressed)
 {
+    ctx->last_inject = now_s();
     zwlr_virtual_pointer_v1_button(ctx->vpointer, now_ms(), linux_button,
                                    pressed ? WL_POINTER_BUTTON_STATE_PRESSED
                                            : WL_POINTER_BUTTON_STATE_RELEASED);
@@ -124,6 +136,7 @@ void wl_pointer_button(struct wl_ctx *ctx, uint32_t linux_button, bool pressed)
 
 void wl_pointer_axis(struct wl_ctx *ctx, bool horizontal, double value, int32_t discrete)
 {
+    ctx->last_inject = now_s();
     uint32_t axis = horizontal ? WL_POINTER_AXIS_HORIZONTAL_SCROLL : WL_POINTER_AXIS_VERTICAL_SCROLL;
     uint32_t t = now_ms();
     zwlr_virtual_pointer_v1_axis_source(ctx->vpointer, WL_POINTER_AXIS_SOURCE_WHEEL);

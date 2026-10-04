@@ -94,6 +94,27 @@ Connect to port 3389, pick **Omarchy** (the default) and log in.
 - After the idle timeout Omarchy locks the session; unlock with the user's
   password.
 
+### Your own desktop (console mode)
+
+If you're logged in at the machine itself, an RDP login as the same user
+attaches to that running desktop instead of starting a second one, like
+connecting to a Windows PC's console session:
+
+- A virtual monitor sized to the RDP window is added and the current
+  workspace moves onto it; every other window and workspace is still there.
+- The machine's own monitors go dark while the desktop is in use remotely.
+- Touching the machine's keyboard or mouse ends the remote session: the
+  monitors come back and the desktop locks (Omarchy's lock screen).
+- Ending or disconnecting the RDP session (closing the window) also locks
+  the desktop. Closing the window keeps it attached until the next login or
+  local input.
+- If the desktop was locked, the RDP window shows the lock screen; unlock it
+  with your password.
+
+The user needs to be in `tsusers` like any RDP user. Set `CONSOLE=no` in
+`~/.config/omarchy/xrdp.conf` to get a separate session instead (only
+sensible while not logged in at the machine).
+
 Per-user settings go in `~/.config/omarchy/xrdp.conf`:
 
 ```bash
@@ -101,7 +122,8 @@ DESKTOP=omarchy     # xorg: use stock Xorg/xorgxrdp (e.g. XFCE via ~/.xinitrc) i
 SCALE=auto          # auto: 1 below 2560 px wide, 1.5 below 3200, else 2
 KEYBOARD=           # xkb layout overriding the client's (e.g. "de")
 RENDER_NODE=/dev/dri/renderD128
-BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and unmapped keys
+BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and key events
+CONSOLE=yes         # no: never attach to a desktop already running locally
 ```
 
 Logs: `~/.local/state/omarchy-xrdp/session-<display>.log` for each session,
