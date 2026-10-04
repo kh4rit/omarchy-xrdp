@@ -17,7 +17,9 @@ Expect rough edges.
   the machine's monitors go dark; local input ends the remote session and
   locks the desktop). `CONSOLE=no` opts out.
 - The client draws the cursor (no lag), with the right shape and size.
-- `MAC_SHORTCUTS=yes`: Windows App on macOS sends Command+C/X/V as Ctrl;
-  they become Omarchy's copy/cut/paste again (terminals included).
+- `MAC_SHORTCUTS=yes`: when Windows App on macOS translates Command+C/X/V
+  to Ctrl, they become Omarchy's copy/cut/paste again (terminals
+  included). Simpler: uncheck those shortcuts in Windows App → Settings →
+  Keyboard.
 - `omarchy-xrdp setup` turns off xrdp's `XorgNoNewPrivileges` for these
   sessions, so sudo and polkit work inside them.

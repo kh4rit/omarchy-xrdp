@@ -103,11 +103,15 @@ Connect to port 3389, pick **Omarchy** (the default) and log in.
 - **Super** shortcuts and Super+drag need the client to send the Windows key.
   Windows Remote Desktop does when full screen (or with "Apply Windows key
   combinations: On the remote computer"). Windows App on macOS sends
-  Command as the Windows key, except that it always turns Command+C, X, V,
-  A, Z, F and W into Ctrl shortcuts (there is no setting); set
-  `MAC_SHORTCUTS=yes` (below) so Command+C/X/V copy and paste in terminals
-  too. It also never holds Command during a mouse drag, so Command+drag
-  can't move windows from Windows App.
+  Command as the Windows key, except for the Mac shortcuts it translates
+  (Command+C, X, V, A, Z, F, W become Ctrl shortcuts by default). Turn
+  those off in **Windows App → Settings → Keyboard** by unchecking every
+  shortcut: Command+C/V then reach Omarchy's universal copy and paste,
+  terminals included. (If you keep the translation, `MAC_SHORTCUTS=yes`
+  below turns Command+C/X/V back into Super.) Windows App never holds
+  Command during a mouse drag, so Command+drag can't move windows; bind
+  Option+drag instead, e.g. in `~/.config/hypr/bindings.lua`:
+  `o.bind("ALT + mouse:272", "Move window", hl.dsp.window.drag(), { mouse = true })`.
 - After the idle timeout Omarchy locks the session; unlock with the user's
   password.
 
@@ -141,9 +145,11 @@ KEYBOARD=           # xkb layout overriding the client's (e.g. "de")
 RENDER_NODE=/dev/dri/renderD128
 BACKEND_DEBUG=      # 1: log frame rate, timings, clipboard and key events
 CONSOLE=yes         # no: never attach to a desktop already running locally
-MAC_SHORTCUTS=      # yes: Windows App on macOS sends Command+C/X/V as Ctrl+C/X/V;
+MAC_SHORTCUTS=      # yes: when Windows App on macOS translates Command+C/X/V to Ctrl,
                     # turn those back into Super+C/X/V (Omarchy copy/cut/paste,
-                    # which also works in terminals). A real Control+C stays Ctrl.
+                    # which also works in terminals; a real Control+C stays
+                    # Ctrl). Not needed once those shortcuts are unchecked in
+                    # Windows App's Keyboard settings.
 ```
 
 Logs: `~/.local/state/omarchy-xrdp/session-<display>.log` for each session,
