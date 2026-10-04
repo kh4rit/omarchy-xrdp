@@ -1,7 +1,7 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.7.0
+pkgver=0.7.1
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"

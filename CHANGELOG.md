@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1
+
+Packaging only, following the Arch package and AUR submission guidelines:
+
+- Complete runtime dependencies (coreutils, gawk, glibc, grep, sed, systemd);
+  the unused xorg-xauth dropped.
+- An install script prints the setup steps after installing or upgrading.
+- Scripts use `/usr/bin/bash` and `/usr/bin/sh` (namcap).
+- `install.sh` enables xrdp and installs the right build dependencies.
+
 ## 0.7.0 — first public release (alpha)
 
 Tested on one machine (Arch/Omarchy, Hyprland 0.56.2, xrdp 0.10.6, Intel

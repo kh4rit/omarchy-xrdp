@@ -68,20 +68,19 @@ into ending the RDP session.
 
 ## Install
 
-From the AUR (pulls in xrdp from the AUR too):
+From source (an AUR package is coming). xrdp itself comes from the AUR;
+its test suite fails on an imlib2 bitmap test, so skip it:
 
 ```
-omarchy pkg aur add omarchy-xrdp
-sudo omarchy-xrdp setup
-sudo systemctl enable --now xrdp
+yay -S --needed --mflags --nocheck xrdp
+git clone https://github.com/kh4rit/omarchy-xrdp.git
+cd omarchy-xrdp && git checkout v0.7.1
+./install.sh
 ```
 
-Or from a checkout of this repository: `./install.sh` (installs the build
-dependencies with `omarchy pkg add`, builds and installs the package with
-`makepkg -si`, and runs the setup).
-
-If building xrdp from the AUR fails in its test suite (an imlib2 bitmap
-test), build it with `--mflags --nocheck`.
+`install.sh` installs the build dependencies with `omarchy pkg add`, builds
+and installs the `omarchy-xrdp` package with `makepkg -si`, runs
+`sudo omarchy-xrdp setup` and enables xrdp.
 
 `sudo omarchy-xrdp setup` makes these marked, reversible edits (and
 upgrades an earlier omarchy-xrdp setup):
