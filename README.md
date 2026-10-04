@@ -68,15 +68,22 @@ into ending the RDP session.
 
 ## Install
 
-Requires xrdp and xorgxrdp (AUR) installed and running.
+From the AUR (pulls in xrdp from the AUR too):
 
 ```
-./install.sh
+omarchy pkg aur add omarchy-xrdp
+sudo omarchy-xrdp setup
+sudo systemctl enable --now xrdp
 ```
 
-This installs the dependencies with `omarchy pkg add`, builds and installs
-the `omarchy-xrdp` package with `makepkg -si`, and runs
-`sudo omarchy-xrdp setup`, which makes these marked, reversible edits (and
+Or from a checkout of this repository: `./install.sh` (installs the build
+dependencies with `omarchy pkg add`, builds and installs the package with
+`makepkg -si`, and runs the setup).
+
+If building xrdp from the AUR fails in its test suite (an imlib2 bitmap
+test), build it with `--mflags --nocheck`.
+
+`sudo omarchy-xrdp setup` makes these marked, reversible edits (and
 upgrades an earlier omarchy-xrdp setup):
 
 | File | Change |
@@ -84,6 +91,14 @@ upgrades an earlier omarchy-xrdp setup):
 | `/etc/xrdp/xrdp.ini` | Adds an `[Omarchy]` session (`lib=libxup.so`, `code=20`) as the login screen default; comments out the `[Xorg]` entry, which would now lead to the same place |
 | `/etc/xrdp/sesman.ini` | `[Xorg] param=` → `omarchy-xrdp-xserver`: Omarchy for users with an Omarchy config, stock Xorg otherwise |
 | `/etc/xrdp/sesman.ini` | `DefaultWindowManager=` → `omarchy-xrdp-startwm` (falls back to `startwm.sh`, so Xorg/XFCE sessions keep working) |
+| `/etc/xrdp/sesman.ini` | `[Security] XorgNoNewPrivileges=false`: sesman starts the "X server" with no_new_privs, which here is the whole session and would break sudo and polkit in it |
+| `/etc/xrdp/gfx.toml` | Nothing; setup only undoes 0.6.0's `threads = 4` if present |
+
+The package also ships an `xrdp.service` drop-in raising xrdp's H.264
+frame limit from 3 MB to 32 MB (larger frames are silently dropped, which
+corrupts the picture until it is redrawn); run
+`sudo systemctl daemon-reload && sudo systemctl restart xrdp` after
+installing or upgrading.
 
 Running sessions aren't affected: setup reloads xrdp-sesman instead of
 restarting it. `sudo omarchy-xrdp remove` puts the files back exactly.

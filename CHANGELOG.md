@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.7.0
+## 0.7.0 — first public release (alpha)
+
+Tested on one machine (Arch/Omarchy, Hyprland 0.56.2, xrdp 0.10.6, Intel
+graphics) with Windows App on macOS, Windows Remote Desktop and FreeRDP.
+Expect rough edges. The features are summed up under 0.5.2; changes since:
 
 - 60 frames/s with the proven pipeline is the default again. `FRAME_RATE`
   above 60 turns on the faster pipeline from 0.6.0 as an **experimental**
@@ -30,11 +34,9 @@
 - `omarchy-xrdp setup` sets x264 to 4 threads per screen in gfx.toml
   (restored by `remove`).
 
-## 0.5.2 — first public release (alpha)
+## 0.5.2
 
-Tested on one machine (Arch/Omarchy, Hyprland 0.56.2, xrdp 0.10.6, Intel
-graphics) with Windows App on macOS, Windows Remote Desktop and FreeRDP.
-Expect rough edges.
+The feature set:
 
 - Native xrdp backend (`omarchy-xrdp-backend`, speaks xrdp's xup protocol):
   H.264/RemoteFX through the RDP graphics pipeline, damage tracking,
