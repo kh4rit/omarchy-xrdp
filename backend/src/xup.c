@@ -629,8 +629,40 @@ static bool ready_to_send(struct server *s)
 
 /* ---- cursor ---------------------------------------------------------------- */
 
+/* An invisible cursor, for when the cursor is drawn into the frames. The
+ * 24 bpp form with an all-set AND mask (xorgxrdp's "None" cursor) works on
+ * clients that ignore 32 bpp alpha. */
+static void send_hidden_cursor(struct server *s)
+{
+    if (s->conn_fd < 0 || !s->have_info || s->suppressed)
+        return;
+    size_t data_bytes = CURSOR_SMALL * CURSOR_SMALL * 3, mask_bytes = CURSOR_SMALL * CURSOR_SMALL / 8;
+    struct msg *m = malloc(sizeof(*m));
+    msg_begin(m, 3);
+    order_begin(m, 1);
+    order_end(m);
+    order_begin(m, 51);
+    put16(m, 0);
+    put16(m, 0);
+    put16(m, 0); /* bpp 0 = 24 */
+    memset(m->buf + m->len, 0, data_bytes);
+    m->len += data_bytes;
+    memset(m->buf + m->len, 0xff, mask_bytes);
+    m->len += mask_bytes;
+    order_end(m);
+    order_begin(m, 2);
+    order_end(m);
+    msg_send(s, m);
+    free(m);
+}
+
 static void send_cursor(struct server *s)
 {
+    if (!wl_client_cursor(s->wl)) {
+        s->cursor_dirty = false;
+        send_hidden_cursor(s);
+        return;
+    }
     struct cursor *c = s->cursor;
     if (!c || !c->pixels || s->conn_fd < 0 || !s->have_info || s->suppressed)
         return;
@@ -849,6 +881,8 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
     switch (msg) {
     case EV_KEYDOWN:
     case EV_KEYUP:
+        log_debug("key %s scancode 0x%02x flags 0x%04x keysym 0x%x", msg == EV_KEYDOWN ? "down" : "up",
+                  p3 & 0x7f, p4, p2);
         key_event(s, p3 & 0x7f, p4, msg == EV_KEYDOWN && !(p4 & KBD_FLAG_UP));
         return;
     case EV_KEYSYNC:
@@ -904,6 +938,7 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
     }
     case EV_INVALIDATE:
         s->want_full = true;
+        s->cursor_dirty = true; /* the client may have reset its pointer */
         return;
     case EV_VERSION:
         send_caps(s);
@@ -960,7 +995,7 @@ static void handle_client_info(struct server *s, const uint8_t *p, size_t len)
 
     set_session_size(s, w, h);
     send_memory_allocation_complete(s);
-    if (s->cursor)
+    if (s->cursor || !wl_client_cursor(s->wl))
         send_cursor(s);
 }
 
@@ -1141,7 +1176,7 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
                 send_frame(&s, s.last_frame, true);
             }
         }
-        if (s.cursor_dirty && s.cursor && s.conn_fd >= 0 && s.have_info && !s.suppressed)
+        if (s.cursor_dirty && (s.cursor || !wl_client_cursor(s.wl)) && s.conn_fd >= 0 && s.have_info && !s.suppressed)
             send_cursor(&s);
 
         /* The clipboard's X display appears after we start: keep trying */

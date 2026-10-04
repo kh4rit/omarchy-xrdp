@@ -231,6 +231,11 @@ void wl_request_frame(struct wl_ctx *ctx, bool full)
     start_screen_frame(ctx);
 }
 
+bool wl_client_cursor(struct wl_ctx *ctx)
+{
+    return ctx->client_cursor;
+}
+
 void wl_get_size(struct wl_ctx *ctx, int *width, int *height)
 {
     *width = ctx->screen.buffer.frame.width;
@@ -345,8 +350,14 @@ struct wl_ctx *wl_start(const char *output_name, const struct wl_callbacks *cb, 
 
     ctx->source = ext_output_image_capture_source_manager_v1_create_source(ctx->source_manager,
                                                                            ctx->output);
-    if (!cursor_init(ctx)) {
-        log_info("no cursor session, drawing the cursor into frames");
+    /* By default the cursor stays in the frames (Hyprland draws it there on a
+     * headless output anyway): Hyprland's cursor session can't deliver its
+     * themed cursors (they come back empty, or black when the capture
+     * permission isn't granted). OMARCHY_XRDP_CURSOR=client tries anyway. */
+    const char *mode = getenv("OMARCHY_XRDP_CURSOR");
+    ctx->client_cursor = mode && !strcmp(mode, "client");
+    if (!ctx->client_cursor || !cursor_init(ctx)) {
+        ctx->client_cursor = false;
         ctx->paint_cursor = true;
     }
     ctx->screen.session = ext_image_copy_capture_manager_v1_create_session(

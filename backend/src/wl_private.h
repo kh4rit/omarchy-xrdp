@@ -60,7 +60,8 @@ struct wl_ctx {
     struct capture screen;
 
     /* cursor (cursor.c) */
-    bool paint_cursor;
+    bool paint_cursor;  /* cursor drawn into the frames */
+    bool client_cursor; /* cursor image sent for the client to draw */
     struct wl_pointer *pointer;
     struct ext_image_copy_capture_cursor_session_v1 *cursor_session;
     struct capture cursor_capture;

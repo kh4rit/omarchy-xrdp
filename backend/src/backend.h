@@ -58,6 +58,8 @@ int wl_after_poll(struct wl_ctx *ctx, bool readable);
  * full requests a complete frame (e.g. after a client reconnects). */
 void wl_request_frame(struct wl_ctx *ctx, bool full);
 void wl_get_size(struct wl_ctx *ctx, int *width, int *height);
+/* Whether the client should draw the cursor (else it is in the frames) */
+bool wl_client_cursor(struct wl_ctx *ctx);
 
 /* Input injection (input.c), coordinates in output buffer pixels */
 void wl_key(struct wl_ctx *ctx, uint32_t evdev_code, bool pressed);

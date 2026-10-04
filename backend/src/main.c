@@ -50,6 +50,8 @@ static double now_s(void)
 
 /* ---- --bench: capture as fast as the compositor delivers ---------------- */
 
+static void dump_ppm(const char *name, const uint8_t *data, int w, int h, int stride, bool alpha);
+
 struct bench {
     struct wl_ctx *wl;
     double start, last_report;
@@ -65,6 +67,8 @@ static void bench_frame(void *data, struct frame *f)
         px = (long)f->width * f->height;
     for (int i = 0; i < f->n_damage && !f->full_damage; i++)
         px += (long)f->damage[i].w * f->damage[i].h;
+    if (b->frames == 0)
+        dump_ppm("screen.ppm", f->data, f->width, f->height, f->stride, false);
     b->frames++;
     b->pixels += px;
     b->frame_pixels = (long)f->width * f->height;
@@ -77,9 +81,48 @@ static void bench_frame(void *data, struct frame *f)
     wl_request_frame(b->wl, false);
 }
 
+static const char *dump_dir;
+
+/* PPM of XRGB pixels; with alpha, composited over magenta to show it */
+static void dump_ppm(const char *name, const uint8_t *data, int w, int h, int stride, bool alpha)
+{
+    if (!dump_dir)
+        return;
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/%s", dump_dir, name);
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6 %d %d 255\n", w, h);
+    for (int y = 0; y < h; y++) {
+        const uint32_t *row = (const uint32_t *)(data + (size_t)y * stride);
+        for (int x = 0; x < w; x++) {
+            uint32_t p = row[x];
+            int a = alpha ? (p >> 24) & 0xff : 255;
+            /* premultiplied over magenta (255, 0, 255) */
+            uint8_t rgb[3] = {
+                (uint8_t)(((p >> 16) & 0xff) + (255 - a)),
+                (uint8_t)((p >> 8) & 0xff),
+                (uint8_t)((p & 0xff) + (255 - a)),
+            };
+            fwrite(rgb, 1, 3, f);
+        }
+    }
+    fclose(f);
+    log_info("wrote %s", path);
+}
+
 static void bench_cursor(void *data, struct cursor *c)
 {
-    log_info("cursor %dx%d hotspot %d,%d", c->width, c->height, c->hot_x, c->hot_y);
+    int transparent = 0, opaque = 0;
+    for (int i = 0; i < c->width * c->height; i++) {
+        uint8_t a = c->pixels[i] >> 24;
+        transparent += a == 0;
+        opaque += a == 255;
+    }
+    log_info("cursor %dx%d hotspot %d,%d: %d transparent, %d opaque pixels", c->width, c->height,
+             c->hot_x, c->hot_y, transparent, opaque);
+    dump_ppm("cursor.ppm", (const uint8_t *)c->pixels, c->width, c->height, c->width * 4, true);
 }
 
 static void bench_resized(void *data, int w, int h)
@@ -124,7 +167,7 @@ static void usage(void)
 {
     fprintf(stderr,
             "Usage: omarchy-xrdp-backend [-v] --socket PATH [--output NAME] [--resize-cmd CMD]\n"
-            "       omarchy-xrdp-backend [-v] --bench SECONDS [--output NAME]\n");
+            "       omarchy-xrdp-backend [-v] --bench SECONDS [--dump DIR] [--output NAME]\n");
 }
 
 int xup_main(const char *socket_path, const char *output, const char *resize_cmd);
@@ -142,6 +185,8 @@ int main(int argc, char **argv)
             resize_cmd = argv[++i];
         else if (!strcmp(argv[i], "--output") && i + 1 < argc)
             output = argv[++i];
+        else if (!strcmp(argv[i], "--dump") && i + 1 < argc)
+            dump_dir = argv[++i];
         else if (!strcmp(argv[i], "--bench") && i + 1 < argc)
             bench = atof(argv[++i]);
         else {
