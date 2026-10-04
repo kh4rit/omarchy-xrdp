@@ -19,7 +19,9 @@ set -euo pipefail
 LIBDIR=${OMARCHY_XRDP_LIBDIR:-/usr/lib/omarchy-xrdp}
 XRDP_INI=${XRDP_INI:-/etc/xrdp/xrdp.ini}
 SESMAN_INI=${SESMAN_INI:-/etc/xrdp/sesman.ini}
+GFX_TOML=${GFX_TOML:-/etc/xrdp/gfx.toml}
 MARK="; omarchy-xrdp"
+GFX_MARK="# omarchy-xrdp"
 
 need_root() {
   # OMARCHY_XRDP_NO_ROOT=1 lets tests run against copies of the ini files
@@ -104,10 +106,35 @@ sesman_restore() {
   '
 }
 
+# gfx.toml: in [$section], replace "$key = ..." by "$key = $value", keeping
+# the original in a marker comment (TOML comments start with #)
+gfx_set() {
+  local section=$1 key=$2 value=$3
+  awk -v mark="$GFX_MARK" -v section="[$section]" -v key="$key" -v value="$value" '
+    /^\[/ { in_section = ($0 == section) }
+    in_section && !done && $0 ~ "^" key "[ \t]*=" {
+      print mark " was: " $0
+      print key " = " value "   " mark
+      done = 1
+      next
+    }
+    { print }
+  '
+}
+
+gfx_restore() {
+  awk -v mark="$GFX_MARK" '
+    index($0, mark " was: ") == 1 { print substr($0, length(mark " was: ") + 1); skip_next = 1; next }
+    skip_next { skip_next = 0; next }
+    { print }
+  '
+}
+
 is_set_up() {
   grep -qxF "lib=libxup.so" <(sed -n "/^$MARK begin\$/,/^$MARK end\$/p" "$XRDP_INI") &&
     grep -qF "$LIBDIR/omarchy-xrdp-xserver" "$SESMAN_INI" &&
-    grep -qx "XorgNoNewPrivileges=false" "$SESMAN_INI"
+    grep -qx "XorgNoNewPrivileges=false" "$SESMAN_INI" &&
+    { [[ ! -f $GFX_TOML ]] || grep -qF "$GFX_MARK was:" "$GFX_TOML"; }
 }
 
 reload_sesman() {
@@ -130,6 +157,9 @@ setup() {
   # Keep the very first backups: the files as they were before omarchy-xrdp
   [[ -e $XRDP_INI.omarchy-xrdp.bak ]] || cp -a "$XRDP_INI" "$XRDP_INI.omarchy-xrdp.bak"
   [[ -e $SESMAN_INI.omarchy-xrdp.bak ]] || cp -a "$SESMAN_INI" "$SESMAN_INI.omarchy-xrdp.bak"
+  if [[ -f $GFX_TOML && ! -e $GFX_TOML.omarchy-xrdp.bak ]]; then
+    cp -a "$GFX_TOML" "$GFX_TOML.omarchy-xrdp.bak"
+  fi
 
   # Undo an earlier version of these changes first
   rewrite "$XRDP_INI" xrdp_ini_remove
@@ -143,6 +173,13 @@ setup() {
   # it would break sudo, pkexec and polkit. omarchy-xrdp-xserver runs the
   # plain, non-setuid /usr/lib/Xorg for other desktops.
   rewrite "$SESMAN_INI" sesman_set Security XorgNoNewPrivileges false
+  # H.264: x264 on 4 threads per screen, so a 4K screen keeps up at 60 fps
+  # and more (one thread manages ~40 fps at 4K), for FRAME_RATE up to 120
+  if [[ -f $GFX_TOML ]]; then
+    rewrite "$GFX_TOML" gfx_restore
+    rewrite "$GFX_TOML" gfx_set x264.default threads 4
+    rewrite "$GFX_TOML" gfx_set x264.default fps_num 120
+  fi
 
   reload_sesman
   echo "xrdp now offers the Omarchy session (default on the login screen)."
@@ -153,6 +190,7 @@ remove() {
   need_root remove
   rewrite "$XRDP_INI" xrdp_ini_remove
   rewrite "$SESMAN_INI" sesman_restore
+  [[ -f $GFX_TOML ]] && rewrite "$GFX_TOML" gfx_restore
   reload_sesman
   echo "Removed the Omarchy session from xrdp."
 }

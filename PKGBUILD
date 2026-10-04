@@ -1,12 +1,12 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.5.2
+pkgver=0.6.0
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
 arch=(x86_64)
-url="https://github.com/GITHUB_USER/omarchy-xrdp"
+url="https://github.com/kh4rit/omarchy-xrdp"
 license=(MIT)
 depends=(xrdp hyprland wlroots0.20 wayland libxkbcommon libxcb libxcursor xorg-xwayland xorg-xauth jq procps-ng bash)
 makedepends=(meson ninja wayland-protocols python)

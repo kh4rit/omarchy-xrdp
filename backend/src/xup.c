@@ -96,6 +96,7 @@ struct server {
 
     int32_t frame_id, frame_ack;
     bool capture_pending;
+    bool held; /* last_frame captured but not sent yet */
     bool want_full;
     bool suppressed;
     double last_send;
@@ -378,9 +379,8 @@ static void send_gfx_h264(struct server *s, struct frame *f, bool full)
     int n = frame_rects(s, f, full, true, rects, MAX_DAMAGE_RECTS);
     if (n == 0)
         return;
-    for (int i = 0; i < n; i++)
-        nv12_convert_rect(s->shm, s->width, s->height, f->data, f->stride, f->width, f->height,
-                          rects[i]);
+    nv12_convert_rects(s->shm, s->width, s->height, f->data, f->stride, f->width, f->height,
+                       rects, n);
     s->shm_dirty_all = false;
 
     int32_t id = ++s->frame_id;
@@ -792,14 +792,10 @@ static void on_frame(void *data, struct frame *f)
     struct server *s = data;
     s->capture_pending = false;
     s->last_frame = f;
-    if (!ready_to_send(s)) {
-        /* Not deliverable now: repaint everything once we can */
-        s->want_full = true;
-        return;
-    }
-    bool full = s->want_full;
-    s->want_full = false;
-    send_frame(s, f, full);
+    /* The main loop sends it once xrdp is done with the previous frame and
+     * the frame interval has passed; its damage stays valid until then,
+     * since no other capture is requested meanwhile */
+    s->held = true;
 }
 
 static void on_cursor(void *data, struct cursor *c)
@@ -815,6 +811,7 @@ static void on_resized(void *data, int w, int h)
 {
     struct server *s = data;
     s->want_full = true;
+    s->held = false; /* captured at the old size */
     /* A new size can come with a new scale: cursor images follow it */
     theme_cursor_reload(s->wl);
     log_info("output is %dx%d, session %dx%d", w, h, s->width, s->height);
@@ -1218,6 +1215,13 @@ static void handle_client_info(struct server *s, const uint8_t *p, size_t len)
                        ? s->ci.rfx_frame_interval
                        : s->ci.normal_frame_interval;
     s->interval = (interval > 0 ? interval : 16) / 1000.0;
+    /* FRAME_RATE in the user's xrdp.conf (e.g. 120 on a LAN) overrides
+     * xrdp's interval, which applies to every user */
+    const char *rate = getenv("OMARCHY_XRDP_FRAME_RATE");
+    if (rate && atoi(rate) >= 10 && atoi(rate) <= 240) {
+        s->interval = 1.0 / atoi(rate);
+        interval = (int)(s->interval * 1000 + 0.5);
+    }
     log_info("client %dx%d bpp %d, capture code %d, frame interval %d ms, keyboard %s/%s", w, h,
              s->ci.bpp, s->ci.capture_code, interval, s->ci.layout, s->ci.variant);
     if (s->ci.capture_code == CC_SUF_A2)
@@ -1405,26 +1409,30 @@ int xup_main(const char *socket_path, const char *output, const char *resize_cmd
 
     while (!s.stop) {
         int timeout = mac_timeout(&s);
+        /* Capture and encode overlap: the next capture is requested as soon
+         * as the last one is handed over (converted into xrdp's buffer), and
+         * a capture that arrives while xrdp still encodes waits for it */
         if (ready_to_send(&s)) {
-            if (s.want_full && s.last_frame && !s.capture_pending) {
-                /* Repaint from the last capture: the screen may not change */
-                s.want_full = false;
-                send_frame(&s, s.last_frame, true);
-            } else if (!s.capture_pending) {
+            if (s.held) {
                 double wait = s.last_send + s.interval - now_s();
                 if (wait <= 0) {
-                    wl_request_frame(s.wl, false);
-                    s.capture_pending = true;
+                    bool full = s.want_full;
+                    s.want_full = s.held = false;
+                    send_frame(&s, s.last_frame, full);
                 } else {
                     int t = (int)(wait * 1000) + 1;
                     if (timeout < 0 || t < timeout)
                         timeout = t;
                 }
             } else if (s.want_full && s.last_frame) {
-                /* A capture is waiting for screen changes; repaint meanwhile */
+                /* Repaint from the last capture: the screen may not change */
                 s.want_full = false;
                 send_frame(&s, s.last_frame, true);
             }
+        }
+        if (!s.capture_pending && !s.held && s.conn_fd >= 0 && s.have_info && !s.suppressed) {
+            wl_request_frame(s.wl, false);
+            s.capture_pending = true;
         }
         if (s.cursor_dirty && (s.cursor || !wl_client_cursor(s.wl)) && s.conn_fd >= 0 && s.have_info && !s.suppressed)
             send_cursor(&s);
