@@ -12,7 +12,7 @@ systemd-run --user --quiet --collect --unit="omxrdp-test-$display" \
   --working-directory="$HOME" \
   ${OMARCHY_XRDP_LIBDIR:+--setenv=OMARCHY_XRDP_LIBDIR=$OMARCHY_XRDP_LIBDIR} \
   ${LD_LIBRARY_PATH:+--setenv=LD_LIBRARY_PATH=$LD_LIBRARY_PATH} \
-  "$here/sesman-emulate.sh" "$display" "${SOCKET_DIR:-/tmp/omxrdp-test}/vnc-$display.sock" "$geometry"
+  "$here/sesman-emulate.sh" "$display" "${SOCKET_DIR:-/tmp/omxrdp-test}/xup-$display.sock" "$geometry"
 for _ in $(seq 100); do
   [[ -f $XDG_RUNTIME_DIR/omarchy-xrdp/$display/pid ]] && echo "session :$display ready" && exit 0
   systemctl --user is-active --quiet "omxrdp-test-$display" || break

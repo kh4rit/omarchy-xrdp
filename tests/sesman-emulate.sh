@@ -1,8 +1,10 @@
 #!/bin/bash
-# Emulate xrdp-sesman's session flow for an Xvnc-over-UDS (code=1) session,
-# as the current user:
-#   1. start the "X server" (omarchy-xrdp-session) with a bare environment
-#      and Xvnc-style arguments
+# Emulate xrdp-sesman's session flow for an Xorg-type (code=20) session, as
+# the current user:
+#   1. start the "X server" (omarchy-xrdp-xserver, sesman.ini [Xorg] param)
+#      with a bare environment and Xorg's arguments; -socket (test only)
+#      puts the backend socket where a private xrdp can reach it, and
+#      -geometry stands in for the size xrdp sends when it connects
 #   2. wait for its X display with xrdp's own waitforx
 #   3. run the window manager step (omarchy-xrdp-startwm) with the login
 #      environment and XRDP_* variables
@@ -26,10 +28,9 @@ xrdp_env=(
 [[ -n ${OMARCHY_XRDP_LIBDIR:-} ]] && xrdp_env+=(OMARCHY_XRDP_LIBDIR="$OMARCHY_XRDP_LIBDIR")
 [[ -n ${LD_LIBRARY_PATH:-} ]] && xrdp_env+=(LD_LIBRARY_PATH="$LD_LIBRARY_PATH")
 
-env -i "${xrdp_env[@]}" "$libdir/omarchy-xrdp-session" ":$display" \
-  -auth .Xauthority -geometry "$geometry" -depth 24 \
-  -rfbport -1 -rfbunixpath "$socket" -rfbunixmode 432 -SecurityTypes None \
-  -bs -nolisten tcp -localhost -dpi 96 &
+env -i "${xrdp_env[@]}" "$libdir/omarchy-xrdp-xserver" ":$display" \
+  -auth .Xauthority -config xrdp/xorg.conf -noreset -nolisten tcp \
+  -logfile .xorgxrdp.%s.log -geometry "$geometry" -socket "$socket" &
 xserver=$!
 echo "X server pid $xserver"
 

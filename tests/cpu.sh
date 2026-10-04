@@ -7,7 +7,7 @@ secs=${2:-10}
 ticks=$(getconf CLK_TCK)
 
 pids() {
-  pgrep -u "$user" -f 'omarchy-xrdp-vnc-proxy|^wayvnc|^Hyprland|omarchy-xrdp/cage'
+  pgrep -u "$user" -f 'omarchy-xrdp-vnc-proxy|omarchy-xrdp-backend|^wayvnc|^Hyprland|omarchy-xrdp/cage|^foot'
   pgrep -u "$(id -u)" -f '^xrdp --nodaemon --config|^xfreerdp3'
 }
 

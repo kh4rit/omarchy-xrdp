@@ -2,15 +2,15 @@
 
 # Start an Omarchy (Hyprland) desktop for an xrdp session.
 #
-# xrdp-sesman runs this in place of Xvnc (sesman.ini [Xvnc] param), with
-# Xvnc-style arguments, for sessions whose xrdp.ini section uses code=1
-# (VNC over a Unix socket). It builds this stack, all as the logged-in user:
+# xrdp-sesman runs this as the X server of an Xorg-type session (code=20,
+# via omarchy-xrdp-xserver, sesman.ini [Xorg] param), with Xorg's
+# arguments. It builds this stack, all as the logged-in user:
 #
 #   cage (headless, gives Hyprland the GPU render node)
 #    └─ start-hyprland → Hyprland, rendering to a virtual HEADLESS-RDP output
-#         └─ wayvnc capturing HEADLESS-RDP and injecting input
-#   omarchy-xrdp-vnc-proxy on the Unix socket xrdp connects to, relaying to
-#   wayvnc and turning xrdp's resize requests into monitor rules
+#   omarchy-xrdp-backend: captures HEADLESS-RDP and serves it to xrdp's xup
+#   module (the protocol xorgxrdp speaks) on xrdp's socket, so xrdp encodes
+#   it with H.264/RemoteFX; injects keyboard and mouse
 #   Xwayland :N on cage, so sesman's waitforx and xrdp-chansrv have the
 #   X display they expect
 #
@@ -31,32 +31,28 @@ while (($#)); do
     :*) display=${1#:} ;;
     -auth) auth=$2; shift ;;
     -geometry) geometry=$2; shift ;;
-    -rfbunixpath) socket=$2; shift ;;
-    -rfbauth)
-      echo "omarchy-xrdp: TCP VNC sessions are not supported; use code=1 in xrdp.ini" >&2
-      exit 1
-      ;;
-    -depth | -dpi | -rfbport | -rfbunixmode | -SecurityTypes | -desktop) shift ;;
+    -socket) socket=$2; shift ;;
+    -config | -logfile | -nolisten | -logverbose | -depth | -dpi) shift ;;
   esac
   shift
 done
 
-if [[ -z $display || -z $socket ]]; then
-  echo "Usage: omarchy-xrdp-session :DISPLAY -rfbunixpath SOCKET [-geometry WxH] [-auth FILE]" >&2
+if [[ -z $display ]]; then
+  echo "Usage: omarchy-xrdp-session :DISPLAY [-auth FILE] [-geometry WxH] [-socket PATH]" >&2
   exit 1
 fi
+# Where xrdp's xup module connects, as xorgxrdp computes it
+socket=${socket:-${XRDP_SOCKET_PATH:-/run/xrdp/$(id -u)}/xrdp_display_$display}
 
+# xrdp sends the real session size on connect; the backend resizes to it
 width=${geometry%x*}
 height=${geometry#*x}
 
 # Per-user overrides in ~/.config/omarchy/xrdp.conf (SCALE is read by
-# omarchy-xrdp-resize)
+# omarchy-xrdp-resize, DESKTOP by omarchy-xrdp-xserver)
 KEYBOARD=""
-MAX_FPS=60
 RENDER_NODE=""
-RESIZE=yes
-WAYVNC_LOG=warning
-PROXY_DEBUG=""
+BACKEND_DEBUG=""
 config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
 [[ -r $config ]] && source "$config"
 
@@ -219,45 +215,24 @@ WAYLAND_DISPLAY=$hypr_wayland systemctl --user import-environment \
   XDG_SESSION_TYPE OMARCHY_XRDP_DISPLAY
 systemctl --user start --no-block omarchy-xrdp-session.target
 
-# With RESIZE, wayvnc listens privately and omarchy-xrdp-vnc-proxy serves
-# xrdp's socket, so xrdp can resize the session to the client window
-if [[ $RESIZE == yes ]]; then
-  vnc_socket="$state/wayvnc.sock"
-else
-  vnc_socket=$socket
-fi
+backend_args=(--socket "$socket" --resize-cmd "$LIBDIR/omarchy-xrdp-resize")
+[[ -n $BACKEND_DEBUG ]] && backend_args=(-v "${backend_args[@]}")
 
-wayvnc_args=(--unix-socket --output=HEADLESS-RDP --max-fps="$MAX_FPS" --log-level="$WAYVNC_LOG" --socket="$state/wayvnc-control.sock")
-[[ -n $KEYBOARD ]] && wayvnc_args+=(--keyboard="$KEYBOARD")
-
-start_wayvnc() {
-  rm -f "$vnc_socket" "$state/wayvnc-control.sock"
-  WAYLAND_DISPLAY=$hypr_wayland wayvnc "${wayvnc_args[@]}" "$vnc_socket" &
-  wayvnc_pid=$!
-  pids+=("$wayvnc_pid")
-  wait_for 50 test -S "$vnc_socket" && chmod 660 "$vnc_socket"
-}
-if ! start_wayvnc; then
-  log "wayvnc did not start"
-  exit 1
-fi
-
-proxy_pid=""
-start_proxy() {
+start_backend() {
   rm -f "$socket"
-  OMARCHY_XRDP_PROXY_DEBUG=$PROXY_DEBUG "$LIBDIR/omarchy-xrdp-vnc-proxy" \
-    "$socket" "$vnc_socket" "$LIBDIR/omarchy-xrdp-resize" &
-  proxy_pid=$!
-  pids+=("$proxy_pid")
+  WAYLAND_DISPLAY=$hypr_wayland OMARCHY_XRDP_KEYBOARD=$KEYBOARD \
+    "$LIBDIR/omarchy-xrdp-backend" "${backend_args[@]}" &
+  backend_pid=$!
+  pids+=("$backend_pid")
   wait_for 50 test -S "$socket"
 }
-if [[ $RESIZE == yes ]] && ! start_proxy; then
-  log "VNC proxy did not start"
+if ! start_backend; then
+  log "omarchy-xrdp-backend did not start"
   exit 1
 fi
 
 # The X display xrdp waits for. Started last, so the session only reports
-# ready once the VNC socket is listening.
+# ready once the backend is listening.
 WAYLAND_DISPLAY=$host_wayland Xwayland ":$display" -geometry 1024x768 -noreset -nolisten tcp ${auth:+-auth "$auth"} &
 pids+=($!)
 if ! wait_for 50 test -S "/tmp/.X11-unix/X$display"; then
@@ -276,20 +251,18 @@ alive() {
   [[ ${stat%% *} != Z ]]
 }
 
-# The session lasts as long as Hyprland: Omarchy logout ends it. Keep wayvnc
-# and the proxy up meanwhile, since xrdp reconnects to the same socket.
+# The session lasts as long as Hyprland: Omarchy logout ends it. Keep the
+# backend up meanwhile, since xrdp reconnects to the same socket.
 restarts=0
 while alive "$cage_pid" && alive "$start_pid"; do
-  for piece in wayvnc proxy; do
-    pid_var=${piece}_pid
-    [[ -n ${!pid_var} ]] && ! alive "${!pid_var}" || continue
+  if ! alive "$backend_pid"; then
     if ((++restarts > 5)); then
-      log "$piece keeps exiting, ending session"
+      log "omarchy-xrdp-backend keeps exiting, ending session"
       exit 1
     fi
-    log "$piece exited, restarting ($restarts)"
-    start_$piece
-  done
+    log "omarchy-xrdp-backend exited, restarting ($restarts)"
+    start_backend
+  fi
   sleep 1
 done
 log "Hyprland exited"

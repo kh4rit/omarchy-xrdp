@@ -21,11 +21,10 @@ case ${1:-} in
     rm -f "$dir/wayland"
     WLR_BACKENDS=headless WLR_HEADLESS_OUTPUTS=1 WLR_LIBINPUT_NO_DEVICES=1 \
       WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128 \
-      LD_LIBRARY_PATH=$stage/prefix/usr/lib \
       setsid "$stage/lib/cage" -- sh -c '
         echo "${DISPLAY:-}" >"$0/x11"
         echo "$WAYLAND_DISPLAY" >"$0/wayland"
-        LD_LIBRARY_PATH=$1/prefix/usr/lib $1/prefix/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode "$2"
+        LD_LIBRARY_PATH=$1/tools/usr/lib $1/tools/usr/bin/wlr-randr --output HEADLESS-1 --custom-mode "$2"
         shift 2
         unset LD_LIBRARY_PATH
         [ -n "${CLIENT_APP:-}" ] && exec $CLIENT_APP
@@ -45,12 +44,12 @@ case ${1:-} in
     ;;
   resize)
     # Resize the client's screen; with /dynamic-resolution FreeRDP follows
-    WAYLAND_DISPLAY=$(<"$dir/wayland") LD_LIBRARY_PATH=$stage/prefix/usr/lib \
-      "$stage/prefix/usr/bin/wlr-randr" --output HEADLESS-1 --custom-mode "$2"
+    WAYLAND_DISPLAY=$(<"$dir/wayland") LD_LIBRARY_PATH=$stage/tools/usr/lib \
+      "$stage/tools/usr/bin/wlr-randr" --output HEADLESS-1 --custom-mode "$2"
     ;;
   xtype)
     shift
-    DISPLAY=$(<"$dir/x11") LD_LIBRARY_PATH=$stage/prefix/usr/lib "$stage/prefix/usr/bin/xdotool" "$@"
+    DISPLAY=$(<"$dir/x11") LD_LIBRARY_PATH=$stage/tools/usr/lib "$stage/tools/usr/bin/xdotool" "$@"
     ;;
   stop)
     [[ -f $dir/pid ]] && kill -- -"$(<"$dir/pid")" 2>/dev/null

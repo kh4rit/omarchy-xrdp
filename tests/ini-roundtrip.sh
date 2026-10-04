@@ -1,15 +1,22 @@
 #!/bin/bash
-# Check that `omarchy-xrdp setup` edits copies of the installed xrdp.ini and
-# sesman.ini as intended, is idempotent, and that `remove` restores them
-# byte for byte.
+# Check `omarchy-xrdp setup` and `remove` on copies of the installed
+# xrdp.ini and sesman.ini (which may already carry an earlier version of the
+# setup): setup must upgrade cleanly, be idempotent, and remove must restore
+# the pristine files (setup's first backups, or the current files if there
+# are none) byte for byte.
 set -eu
 root=$(dirname "$(readlink -f "$0")")/..
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-cp /etc/xrdp/xrdp.ini /etc/xrdp/sesman.ini "$tmp/"
-cp "$tmp/xrdp.ini" "$tmp/xrdp.ini.orig"
-cp "$tmp/sesman.ini" "$tmp/sesman.ini.orig"
+for f in xrdp.ini sesman.ini; do
+  cp "/etc/xrdp/$f" "$tmp/$f"
+  if [[ -r /etc/xrdp/$f.omarchy-xrdp.bak ]]; then
+    cp "/etc/xrdp/$f.omarchy-xrdp.bak" "$tmp/$f.pristine"
+  else
+    cp "/etc/xrdp/$f" "$tmp/$f.pristine"
+  fi
+done
 
 run() {
   OMARCHY_XRDP_NO_ROOT=1 XRDP_INI="$tmp/xrdp.ini" SESMAN_INI="$tmp/sesman.ini" \
@@ -17,10 +24,10 @@ run() {
 }
 
 run setup
-echo "--- xrdp.ini changes"
-diff "$tmp/xrdp.ini.orig" "$tmp/xrdp.ini" || true
-echo "--- sesman.ini changes"
-diff "$tmp/sesman.ini.orig" "$tmp/sesman.ini" || true
+echo "--- xrdp.ini changes from pristine"
+diff "$tmp/xrdp.ini.pristine" "$tmp/xrdp.ini" || true
+echo "--- sesman.ini changes from pristine"
+diff "$tmp/sesman.ini.pristine" "$tmp/sesman.ini" || true
 
 cp "$tmp/xrdp.ini" "$tmp/xrdp.ini.once"
 cp "$tmp/sesman.ini" "$tmp/sesman.ini.once"
@@ -29,5 +36,5 @@ cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.once" && cmp "$tmp/sesman.ini" "$tmp/sesman.i
 echo "--- second setup changed nothing"
 
 run remove
-cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.orig" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.orig"
-echo "--- remove restored both files exactly"
+cmp "$tmp/xrdp.ini" "$tmp/xrdp.ini.pristine" && cmp "$tmp/sesman.ini" "$tmp/sesman.ini.pristine"
+echo "--- remove restored the pristine files exactly"

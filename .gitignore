@@ -1,5 +1,6 @@
-src/
-pkg/
+/src/
+/pkg/
 *.pkg.tar.zst
 cage-*.tar.gz
 __pycache__/
+backend/build/

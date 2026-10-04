@@ -12,9 +12,9 @@ for ((r = 1; r <= rounds; r++)); do
   "$stage/tests/rdp-client.sh" stop
   sudo -n -u "$user" "$stage/stop" 20
   sudo -n -u "$user" "$stage/start" 20 1600x900 >/dev/null || { echo "round $r: session failed"; continue; }
-  sudo -n -u "$user" chmod 666 "$stage/vnc-20.sock"
+  sudo -n -u "$user" chmod 666 "$stage/xup-20.sock"
   mark=$(wc -l <"$xrdp_log")
-  RDP_CLIENT=xfreerdp3 "$stage/tests/rdp-client.sh" start 127.0.0.1:13389 "$size" /dynamic-resolution >/dev/null
+  RDP_CLIENT=xfreerdp3 "$stage/tests/rdp-client.sh" start 127.0.0.1:${PORT:-13390} "$size" /dynamic-resolution >/dev/null
   sleep 9
   got=$(sudo -n -u "$user" "$stage/tests/hypr.sh" 20 -j monitors | jq -r '.[0] | "\(.width)x\(.height)"')
   result=$(tail -n +"$mark" "$xrdp_log" | grep -oE 'successfully resized|resize failed - error code [0-9]+' | tr '\n' ',' )

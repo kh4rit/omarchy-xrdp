@@ -30,9 +30,9 @@ check "session starts" "1600x900" "$(size)"
 sleep 3
 check "Omarchy session services start" "== graphical-session.target: active" \
   "$(as_user "$stage/tests/user-units.sh" | tail -1)"
-as_user chmod 666 "$stage/vnc-20.sock"
+as_user chmod 666 "$stage/xup-20.sock"
 
-RDP_CLIENT=xfreerdp3 "$client" start 127.0.0.1:13389 1280x720 /dynamic-resolution >/dev/null
+RDP_CLIENT=xfreerdp3 "$client" start 127.0.0.1:${PORT:-13390} 1280x720 /dynamic-resolution >/dev/null
 sleep 9
 check "resizes to the client at connect" "1280x720" "$(size)"
 
@@ -46,6 +46,9 @@ rm -f "$marker"
 "$client" xtype key Return
 sleep 1.5
 check "typing reaches the session" "typed-over-rdp" "$(cat "$marker" 2>/dev/null)"
+
+check "Super+drag (Command-drag on a Mac) moves a window" "PASS" \
+  "$("$stage/tests/drag-test.sh" "$user" 2>/dev/null | grep -oE '^(PASS|FAIL)')"
 
 "$client" resize 1920x1080
 sleep 8

@@ -6,10 +6,13 @@
 #   omarchy-xrdp remove   Undo setup (needs root)
 #   omarchy-xrdp status   Show configuration and running Omarchy RDP sessions
 #
-# setup adds an [Omarchy] section to xrdp.ini (a VNC-over-Unix-socket
-# session, code=1), points sesman's Xvnc server at omarchy-xrdp-session and
-# its default window manager at omarchy-xrdp-startwm. Every change is
-# recorded with an "omarchy-xrdp" marker so remove can put things back.
+# setup adds an [Omarchy] section to xrdp.ini: an Xorg-type session (code=20)
+# using xrdp's xup module, the protocol xorgxrdp speaks, so xrdp encodes it
+# with H.264/RemoteFX. It points sesman's Xorg server at omarchy-xrdp-xserver
+# (Omarchy for users with an Omarchy config, stock Xorg otherwise) and its
+# default window manager at omarchy-xrdp-startwm, and hides xrdp.ini's own
+# [Xorg] entry, which would now lead to the same place. Every change carries
+# an "omarchy-xrdp" marker so remove (and a later setup) can undo it.
 
 set -euo pipefail
 
@@ -38,23 +41,28 @@ rewrite() {
 }
 
 xrdp_ini_add() {
-  # Insert the Omarchy session before the first session section so it is
-  # the login screen's default
+  # Insert the Omarchy session before the first session section so it is the
+  # login screen's default, and comment out the [Xorg] section
   awk -v mark="$MARK" '
     function block() {
       print mark " begin"
       print "[Omarchy]"
       print "name=Omarchy"
-      print "lib=libvnc.so"
+      print "lib=libxup.so"
       print "username=ask"
       print "password=ask"
       print "port=-1"
-      print "code=1"
+      print "code=20"
+      print "h264_frame_interval=16"
+      print "rfx_frame_interval=32"
+      print "normal_frame_interval=40"
       print mark " end"
       print ""
       done = 1
     }
+    /^\[/ { in_xorg = ($0 == "[Xorg]") }
     !done && /^\[/ && !/^\[(Globals|Logging|LoggingPerLogger|Channels)\]/ { block() }
+    in_xorg && $0 != "" { print mark " hid: " $0; next }
     { print }
     END { if (!done) { print ""; block() } }
   '
@@ -66,6 +74,7 @@ xrdp_ini_remove() {
     skip && $0 == mark " end" { skip = 0; dropblank = 1; next }
     skip { next }
     dropblank && /^$/ { dropblank = 0; next }
+    index($0, mark " hid: ") == 1 { print substr($0, length(mark " hid: ") + 1); dropblank = 0; next }
     { dropblank = 0; print }
   '
 }
@@ -95,7 +104,8 @@ sesman_restore() {
 }
 
 is_set_up() {
-  grep -qxF "$MARK begin" "$XRDP_INI" && grep -q "^$MARK was: " "$SESMAN_INI"
+  grep -qxF "lib=libxup.so" <(sed -n "/^$MARK begin\$/,/^$MARK end\$/p" "$XRDP_INI") &&
+    grep -qF "$LIBDIR/omarchy-xrdp-xserver" "$SESMAN_INI"
 }
 
 reload_sesman() {
@@ -115,14 +125,17 @@ setup() {
     return
   fi
 
-  cp -a "$XRDP_INI" "$XRDP_INI.omarchy-xrdp.bak"
-  cp -a "$SESMAN_INI" "$SESMAN_INI.omarchy-xrdp.bak"
+  # Keep the very first backups: the files as they were before omarchy-xrdp
+  [[ -e $XRDP_INI.omarchy-xrdp.bak ]] || cp -a "$XRDP_INI" "$XRDP_INI.omarchy-xrdp.bak"
+  [[ -e $SESMAN_INI.omarchy-xrdp.bak ]] || cp -a "$SESMAN_INI" "$SESMAN_INI.omarchy-xrdp.bak"
 
-  grep -qxF "$MARK begin" "$XRDP_INI" || rewrite "$XRDP_INI" xrdp_ini_add
-  if ! grep -q "^$MARK was: " "$SESMAN_INI"; then
-    rewrite "$SESMAN_INI" sesman_set Globals DefaultWindowManager "$LIBDIR/omarchy-xrdp-startwm"
-    rewrite "$SESMAN_INI" sesman_set Xvnc param "$LIBDIR/omarchy-xrdp-session"
-  fi
+  # Undo an earlier version of these changes first
+  rewrite "$XRDP_INI" xrdp_ini_remove
+  rewrite "$SESMAN_INI" sesman_restore
+
+  rewrite "$XRDP_INI" xrdp_ini_add
+  rewrite "$SESMAN_INI" sesman_set Globals DefaultWindowManager "$LIBDIR/omarchy-xrdp-startwm"
+  rewrite "$SESMAN_INI" sesman_set Xorg param "$LIBDIR/omarchy-xrdp-xserver"
 
   reload_sesman
   echo "xrdp now offers the Omarchy session (default on the login screen)."

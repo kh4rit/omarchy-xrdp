@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# xrdp-sesman's X server for Xorg-type sessions (sesman.ini [Xorg] param).
+# Users with an Omarchy config get an Omarchy desktop served by
+# omarchy-xrdp-backend; users without one, or who set DESKTOP=xorg in
+# ~/.config/omarchy/xrdp.conf, get the stock Xorg + xorgxrdp (and their
+# ~/.xinitrc desktop, e.g. XFCE).
+
+DESKTOP=omarchy
+config="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/xrdp.conf"
+[[ -r $config ]] && source "$config"
+
+if [[ $DESKTOP == omarchy && -r $HOME/.config/hypr/hyprland.lua ]]; then
+  exec "$(dirname "$(readlink -f "$0")")/omarchy-xrdp-session" "$@"
+fi
+
+exec /usr/lib/Xorg "$@"
