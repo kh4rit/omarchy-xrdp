@@ -1099,19 +1099,19 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
             bool chord_mod = sc == 0x1d || sc == 0x38 || sc == 0x5b || sc == 0x5c;
             if ((shift || chord_mod) && down && !seen[ext][sc]) {
                 seen[ext][sc] = true;
-                log_info("modifier key: scancode 0x%02x%s (flags 0x%04x, keysym 0x%x)", sc,
+                log_debug("modifier key: scancode 0x%02x%s (flags 0x%04x, keysym 0x%x)", sc,
                          ext ? " extended" : "", p4, p2);
             }
             /* Shortcuts: Ctrl/Alt/Win transitions and the keys pressed while
              * one is held, never plain or Shift typing (the first 300) */
             if (chord_mod) {
                 if (logged++ < 300)
-                    log_info("shortcut: %s 0x%02x%s", down ? "down" : "up", sc, ext ? "e" : "");
+                    log_debug("shortcut: %s 0x%02x%s", down ? "down" : "up", sc, ext ? "e" : "");
                 held[ext][sc] = down;
             } else if ((held[0][0x1d] || held[1][0x1d] || held[0][0x38] || held[1][0x38] ||
                         held[1][0x5b] || held[1][0x5c] || held[0][0x5b] || held[0][0x5c]) &&
                        !shift && logged++ < 300) {
-                log_info("shortcut: %s 0x%02x%s with a modifier held", down ? "down" : "up", sc,
+                log_debug("shortcut: %s 0x%02x%s with a modifier held", down ? "down" : "up", sc,
                          ext ? "e" : "");
             }
         }
@@ -1133,7 +1133,7 @@ static void handle_event(struct server *s, const uint8_t *p, size_t len)
             /* With the shortcut log: how clients order Command and clicks */
             static int clicks;
             if (clicks++ < 100)
-                log_info("shortcut: left button %s", msg == EV_LBUTTONDOWN ? "down" : "up");
+                log_debug("shortcut: left button %s", msg == EV_LBUTTONDOWN ? "down" : "up");
         }
         wl_pointer_button(s->wl, BTN_LEFT, msg == EV_LBUTTONDOWN);
         return;
