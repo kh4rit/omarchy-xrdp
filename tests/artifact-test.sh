@@ -44,10 +44,26 @@ for _ in $(seq "$rounds"); do
 done
 # End on the first picture (a real wallpaper): what is still wrong now stays wrong
 target hyprctl dispatch 'hl.dsp.focus({ workspace = "1" })' >/dev/null
-sleep 4
+switched=$(date +%s.%N)
 
-WAYLAND_DISPLAY=$(<"$stage/console-target-$uid/wayland") grim -t ppm -o HEADLESS-RDP "$out/server.ppm"
-WAYLAND_DISPLAY=$(<"/tmp/omxrdp-client-$uid/wayland") grim -t ppm "$out/client.ppm"
+# Lag: how long until the client shows what Hyprland rendered (max 30 s)
+shots() {
+  WAYLAND_DISPLAY=$(<"$stage/console-target-$uid/wayland") grim -t ppm -o HEADLESS-RDP "$out/server.ppm"
+  WAYLAND_DISPLAY=$(<"/tmp/omxrdp-client-$uid/wayland") grim -t ppm "$out/client.ppm"
+}
+settled=""
+while (($(date +%s) - ${switched%.*} < 30)); do
+  shots
+  r=$(python3 "$stage/tests/compare-ppm.py" --fast "$out/server.ppm" "$out/client.ppm"); rc_fast=$?
+  [[ -n ${DEBUG:-} ]] && echo "  $(date +%T.%N | cut -c1-12) $r" >&2
+  if ((rc_fast == 0)); then
+    settled=$(awk -v a="$(date +%s.%N)" -v b="$switched" 'BEGIN { print a - b }')
+    break
+  fi
+done
+if [[ -n $settled ]]; then printf 'client caught up after %.1f s\n' "$settled"; else echo "client never caught up (30 s)"; fi
+sleep 3 # then: what is still wrong now stays wrong
+shots
 python3 "$stage/tests/compare-ppm.py" "$out/server.ppm" "$out/client.ppm"
 rc=$?
 

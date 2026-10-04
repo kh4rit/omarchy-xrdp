@@ -127,6 +127,7 @@ struct server {
     double stats_start;
     double sent_at;       /* when the frame in flight was sent */
     double ack_wait_sum;  /* seconds from send to ack, summed over frames */
+    double ack_wait_max;  /* the longest of them */
     double convert_sum;   /* seconds spent converting, summed */
     long acks;
 };
@@ -623,11 +624,14 @@ static void send_frame(struct server *s, struct frame *f, bool full)
     s->last_send = s->sent_at = now_s();
     s->convert_sum += s->last_send - t0;
     s->frames_sent++;
-    if (verbose && s->last_send - s->stats_start >= 5) {
-        log_debug("%.1f frames/s sent, %.1f ms to convert and send, %.1f ms until xrdp acks",
-                  s->frames_sent / (s->last_send - s->stats_start),
-                  1000 * s->convert_sum / s->frames_sent,
-                  s->acks ? 1000 * s->ack_wait_sum / s->acks : 0);
+    /* Frame statistics (never input): every 5 s in debug mode, else 10 s */
+    if (s->last_send - s->stats_start >= (verbose ? 5 : 10)) {
+        log_info("%.1f frames/s sent, %.1f ms to convert and send, %.1f ms until xrdp acks "
+                 "(longest %.0f ms)",
+                 s->frames_sent / (s->last_send - s->stats_start),
+                 1000 * s->convert_sum / s->frames_sent,
+                 s->acks ? 1000 * s->ack_wait_sum / s->acks : 0, 1000 * s->ack_wait_max);
+        s->ack_wait_max = 0;
         s->frames_sent = s->acks = 0;
         s->convert_sum = s->ack_wait_sum = 0;
         s->stats_start = s->last_send;
@@ -1260,6 +1264,8 @@ static void handle_message(struct server *s, uint16_t type, const uint8_t *p, si
         memcpy(&id, p + 4, 4);
         if (s->frame_ack < s->frame_id && (id == INT_MAX || id >= s->frame_id)) {
             s->ack_wait_sum += now_s() - s->sent_at;
+            if (now_s() - s->sent_at > s->ack_wait_max)
+                s->ack_wait_max = now_s() - s->sent_at;
             s->acks++;
         }
         s->frame_ack = id == INT_MAX ? s->frame_id : id;

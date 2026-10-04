@@ -27,16 +27,20 @@ def read_ppm(path):
     return w, h, data[pos + 1:pos + 1 + w * h * 3]
 
 
-w1, h1, a = read_ppm(sys.argv[1])
-w2, h2, b = read_ppm(sys.argv[2])
+paths = [p for p in sys.argv[1:] if not p.startswith("--")]
+w1, h1, a = read_ppm(paths[0])
+w2, h2, b = read_ppm(paths[1])
 if (w1, h1) != (w2, h2):
     print(f"FAIL size differs: server {w1}x{h1}, client {w2}x{h2}")
     sys.exit(2)
 
 bad = total = 0
-step = 2  # sample every other pixel in a block: plenty, and faster
-for by in range(0, h1 - 15, 16):
-    for bx in range(0, w1 - 15, 16):
+# Sample every other pixel in a block; --fast: every 8th block too
+fast = "--fast" in sys.argv
+step = 2
+block_step = 8 if fast else 1
+for by in range(0, h1 - 15, 16 * block_step):
+    for bx in range(0, w1 - 15, 16 * block_step):
         diff = n = 0
         for y in range(by, by + 16, step):
             row = (y * w1 + bx) * 3
