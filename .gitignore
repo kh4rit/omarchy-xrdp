@@ -4,3 +4,4 @@
 cage-*.tar.gz
 __pycache__/
 backend/build/
+/packaging/aur/
