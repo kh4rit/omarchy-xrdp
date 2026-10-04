@@ -1,7 +1,7 @@
 # Local package for this checkout: makepkg -si (or ./install.sh)
 
 pkgname=omarchy-xrdp
-pkgver=0.6.0
+pkgver=0.6.1
 pkgrel=1
 _cagever=0.3.1
 pkgdesc="Remote Omarchy (Hyprland) desktops over RDP, through xrdp"
@@ -43,6 +43,8 @@ package() {
   install -Dm755 "$startdir/shims/uwsm" "$lib/shims/uwsm"
   install -d "$pkgdir/usr/share/icons"
   cp -r hidden-cursors "$pkgdir/usr/share/icons/omarchy-xrdp-hidden"
+  install -Dm644 "$startdir/systemd/xrdp-omarchy.conf" \
+    "$pkgdir/usr/lib/systemd/system/xrdp.service.d/omarchy-xrdp.conf"
   install -Dm644 "$startdir/systemd/omarchy-xrdp-session.target" \
     "$pkgdir/usr/lib/systemd/user/omarchy-xrdp-session.target"
   install -Dm755 "$startdir/bin/omarchy-xrdp" "$pkgdir/usr/bin/omarchy-xrdp"

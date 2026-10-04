@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1
+
+- Fix green, smeared blocks after big screen changes (e.g. fast workspace
+  switches at 4K): xrdp silently drops any H.264 frame over 3 MB, and the
+  client then decodes everything after it against the wrong picture. The
+  package raises the limit to 32 MB for xrdp.service
+  (`XRDP_GFX_MAX_COMPRESSED_BYTES`). Reproduced with
+  `tests/artifact-test.sh` through `tests/throttle-proxy.py` (150 Mbit/s).
+
 ## 0.6.0
 
 - `FRAME_RATE` per user (e.g. 120 on a LAN): frames/s sent and the RDP
